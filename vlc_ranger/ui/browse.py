@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QLineEdit, QStackedWidget, QVBoxLayout, QWidget
 from vlc_ranger.db import LibraryDB
 from vlc_ranger.ui.views.generic import GenericView
 from vlc_ranger.ui.views.movies import MoviesView
+from vlc_ranger.ui.views.tv import TVView
 
 
 class BrowseRouter(QWidget):
@@ -30,8 +31,10 @@ class BrowseRouter(QWidget):
         self.stack.addWidget(self.generic)
         self.movies = MoviesView()
         self.stack.addWidget(self.movies)
+        self.tv = TVView(self.db)
+        self.stack.addWidget(self.tv)
 
-        for v in (self.generic, self.movies):
+        for v in (self.generic, self.movies, self.tv):
             v.play_requested.connect(self.play_requested.emit)
             v.queue_end_requested.connect(self.queue_end_requested.emit)
             v.queue_front_requested.connect(self.queue_front_requested.emit)
@@ -45,12 +48,14 @@ class BrowseRouter(QWidget):
     def show_library(self, library_id: int):
         self.current_library_id = library_id
         type_ = self.db.get_library_type(library_id)
-        rows = self.db.files_in_library(library_id)
-        if type_ == "movies":
-            self.movies.set_rows(rows)
+        if type_ == "tv":
+            self.tv.set_library(library_id)
+            self.stack.setCurrentWidget(self.tv)
+        elif type_ == "movies":
+            self.movies.set_rows(self.db.files_in_library(library_id))
             self.stack.setCurrentWidget(self.movies)
         else:
-            self.generic.set_rows(rows)
+            self.generic.set_rows(self.db.files_in_library(library_id))
             self.stack.setCurrentWidget(self.generic)
 
     def _on_search(self, text: str):

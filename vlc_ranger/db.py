@@ -276,6 +276,38 @@ class LibraryDB:
                  FROM files WHERE library_id=? ORDER BY filename"""
         return [FileRow(*r) for r in self.conn.execute(sql, (library_id,))]
 
+    def tv_shows(self, library_id: int) -> list[tuple[str, int]]:
+        """Returns (series, episode_count). NULL series shows as '(Unsorted)'."""
+        return list(self.conn.execute(
+            """SELECT COALESCE(series, '(Unsorted)') AS s, COUNT(*) FROM files
+               WHERE library_id=? GROUP BY s ORDER BY s""",
+            (library_id,),
+        ))
+
+    def tv_seasons(self, library_id: int, series: str) -> list[tuple[int | None, int]]:
+        return list(self.conn.execute(
+            """SELECT season, COUNT(*) FROM files
+               WHERE library_id=? AND COALESCE(series,'(Unsorted)')=?
+               GROUP BY season ORDER BY season""",
+            (library_id, series),
+        ))
+
+    def tv_episodes(self, library_id: int, series: str,
+                    season: int | None) -> list[FileRow]:
+        cols = """id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                  title, year, series, season, episode, artist, album, track"""
+        if season is None:
+            sql = f"""SELECT {cols} FROM files
+                      WHERE library_id=? AND COALESCE(series,'(Unsorted)')=? AND season IS NULL
+                      ORDER BY filename"""
+            args = (library_id, series)
+        else:
+            sql = f"""SELECT {cols} FROM files
+                      WHERE library_id=? AND COALESCE(series,'(Unsorted)')=? AND season=?
+                      ORDER BY episode, filename"""
+            args = (library_id, series, season)
+        return [FileRow(*r) for r in self.conn.execute(sql, args)]
+
     def files_under(self, dir_path: str, recursive: bool = True) -> list[FileRow]:
         """Files inside a folder. recursive=True walks subdirectories."""
         if recursive:
