@@ -124,12 +124,25 @@ class LibraryDB:
                 if name not in cols:
                     self.conn.execute(f"ALTER TABLE files ADD COLUMN {name} {decl}")
 
+        # v0 had a 2-column files_fts (filename, parent_dir). v1 expands it to 6 columns.
+        # CREATE VIRTUAL TABLE IF NOT EXISTS is a no-op, so reshape by drop+recreate.
+        fts_exists = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='files_fts'"
+        ).fetchone() is not None
+        if fts_exists:
+            fts_cols = [r[1] for r in self.conn.execute("PRAGMA table_info(files_fts)")]
+            if set(fts_cols) != {"filename", "parent_dir", "title", "series", "artist", "album"}:
+                self.conn.execute("DROP TRIGGER IF EXISTS files_ai")
+                self.conn.execute("DROP TRIGGER IF EXISTS files_ad")
+                self.conn.execute("DROP TRIGGER IF EXISTS files_au")
+                self.conn.execute("DROP TABLE files_fts")
+
     def _migrate(self) -> None:
         v = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if v < 1:
-            self._migrate_v0_to_v1()
-            self.conn.execute("PRAGMA user_version = 1")
-            self.conn.commit()
+            with self.conn:
+                self._migrate_v0_to_v1()
+                self.conn.execute("PRAGMA user_version = 1")
 
     def _migrate_v0_to_v1(self) -> None:
         """Move existing `roots` rows into a Default library and backfill files.library_id."""
@@ -149,9 +162,10 @@ class LibraryDB:
                 "SELECT id FROM libraries WHERE name='Default'"
             ).fetchone()[0]
             for r in old_roots:
+                normalized = r.rstrip("/") or r          # don't turn "/" into ""
                 self.conn.execute(
                     "INSERT OR IGNORE INTO library_folders(library_id, path) VALUES (?, ?)",
-                    (lib_id, r),
+                    (lib_id, normalized),
                 )
             # Sync the FTS shadow table with existing pre-v1 file rows so the
             # post-UPDATE trigger has consistent state to delete-then-reinsert.
