@@ -8,14 +8,23 @@ from typing import Iterable
 from vlc_ranger.models import FileRow
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS roots (
+CREATE TABLE IF NOT EXISTS libraries (
     id      INTEGER PRIMARY KEY,
-    path    TEXT UNIQUE NOT NULL,
+    name    TEXT NOT NULL UNIQUE,
+    type    TEXT NOT NULL CHECK (type IN ('movies','tv','music','generic')),
     added   INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS library_folders (
+    id          INTEGER PRIMARY KEY,
+    library_id  INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    path        TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_library_folders_lib ON library_folders(library_id);
+
 CREATE TABLE IF NOT EXISTS files (
     id          INTEGER PRIMARY KEY,
+    library_id  INTEGER REFERENCES libraries(id) ON DELETE CASCADE,
     path        TEXT UNIQUE NOT NULL,
     parent_dir  TEXT NOT NULL,
     filename    TEXT NOT NULL,
@@ -23,30 +32,41 @@ CREATE TABLE IF NOT EXISTS files (
     size        INTEGER,
     mtime       INTEGER,
     duration    REAL,
-    last_seen   INTEGER NOT NULL
+    last_seen   INTEGER NOT NULL,
+    title       TEXT,
+    year        INTEGER,
+    series      TEXT,
+    season      INTEGER,
+    episode     INTEGER,
+    artist      TEXT,
+    album       TEXT,
+    track       INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_files_parent ON files(parent_dir);
-CREATE INDEX IF NOT EXISTS idx_files_ext    ON files(ext);
-CREATE INDEX IF NOT EXISTS idx_files_mtime  ON files(mtime);
+CREATE INDEX IF NOT EXISTS idx_files_library ON files(library_id);
+CREATE INDEX IF NOT EXISTS idx_files_parent  ON files(parent_dir);
+CREATE INDEX IF NOT EXISTS idx_files_ext     ON files(ext);
+CREATE INDEX IF NOT EXISTS idx_files_mtime   ON files(mtime);
+CREATE INDEX IF NOT EXISTS idx_files_series  ON files(library_id, series, season, episode);
+CREATE INDEX IF NOT EXISTS idx_files_album   ON files(library_id, artist, album, track);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
-    filename, parent_dir,
+    filename, parent_dir, title, series, artist, album,
     content='files', content_rowid='id', tokenize='unicode61'
 );
 
 CREATE TRIGGER IF NOT EXISTS files_ai AFTER INSERT ON files BEGIN
-    INSERT INTO files_fts(rowid, filename, parent_dir)
-    VALUES (new.id, new.filename, new.parent_dir);
+    INSERT INTO files_fts(rowid, filename, parent_dir, title, series, artist, album)
+    VALUES (new.id, new.filename, new.parent_dir, new.title, new.series, new.artist, new.album);
 END;
 CREATE TRIGGER IF NOT EXISTS files_ad AFTER DELETE ON files BEGIN
-    INSERT INTO files_fts(files_fts, rowid, filename, parent_dir)
-    VALUES('delete', old.id, old.filename, old.parent_dir);
+    INSERT INTO files_fts(files_fts, rowid, filename, parent_dir, title, series, artist, album)
+    VALUES('delete', old.id, old.filename, old.parent_dir, old.title, old.series, old.artist, old.album);
 END;
 CREATE TRIGGER IF NOT EXISTS files_au AFTER UPDATE ON files BEGIN
-    INSERT INTO files_fts(files_fts, rowid, filename, parent_dir)
-    VALUES('delete', old.id, old.filename, old.parent_dir);
-    INSERT INTO files_fts(rowid, filename, parent_dir)
-    VALUES (new.id, new.filename, new.parent_dir);
+    INSERT INTO files_fts(files_fts, rowid, filename, parent_dir, title, series, artist, album)
+    VALUES('delete', old.id, old.filename, old.parent_dir, old.title, old.series, old.artist, old.album);
+    INSERT INTO files_fts(rowid, filename, parent_dir, title, series, artist, album)
+    VALUES (new.id, new.filename, new.parent_dir, new.title, new.series, new.artist, new.album);
 END;
 
 CREATE TABLE IF NOT EXISTS watch_state (
@@ -59,6 +79,11 @@ CREATE TABLE IF NOT EXISTS watch_state (
 CREATE TABLE IF NOT EXISTS queue (
     pos      INTEGER PRIMARY KEY,
     file_id  INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ui_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT
 );
 """
 
@@ -73,17 +98,39 @@ class LibraryDB:
         self.conn.commit()
 
     # roots ----------------------------------------------------------------
-    def add_root(self, path: str) -> int:
+    # NOTE: These methods bridge the legacy "roots" concept to the v1
+    # libraries/library_folders schema. A real library-aware API arrives in
+    # Task 11; for now we keep a single implicit "Default" generic library
+    # so the existing UI continues to work on a fresh v1 DB.
+    def _default_library_id(self) -> int:
+        row = self.conn.execute(
+            "SELECT id FROM libraries WHERE name=?", ("Default",)
+        ).fetchone()
+        if row:
+            return row[0]
         cur = self.conn.execute(
-            "INSERT OR IGNORE INTO roots(path, added) VALUES (?, ?)",
-            (path, int(time.time())),
+            "INSERT INTO libraries(name, type, added) VALUES (?, ?, ?)",
+            ("Default", "generic", int(time.time())),
         )
         self.conn.commit()
-        row = self.conn.execute("SELECT id FROM roots WHERE path=?", (path,)).fetchone()
+        return cur.lastrowid
+
+    def add_root(self, path: str) -> int:
+        lib_id = self._default_library_id()
+        self.conn.execute(
+            "INSERT OR IGNORE INTO library_folders(library_id, path) VALUES (?, ?)",
+            (lib_id, path),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT id FROM library_folders WHERE path=?", (path,)
+        ).fetchone()
         return row[0]
 
     def list_roots(self) -> list[str]:
-        return [r[0] for r in self.conn.execute("SELECT path FROM roots ORDER BY path")]
+        return [r[0] for r in self.conn.execute(
+            "SELECT path FROM library_folders ORDER BY path"
+        )]
 
     # files ----------------------------------------------------------------
     def upsert_files(self, rows: Iterable[tuple]) -> None:
@@ -114,7 +161,8 @@ class LibraryDB:
         if not query.strip():
             return []
         sql = """
-            SELECT f.id, f.path, f.parent_dir, f.filename, f.ext, f.size, f.mtime, f.duration
+            SELECT f.id, f.library_id, f.path, f.parent_dir, f.filename, f.ext, f.size, f.mtime, f.duration,
+                   f.title, f.year, f.series, f.season, f.episode, f.artist, f.album, f.track
             FROM files_fts JOIN files f ON f.id = files_fts.rowid
             WHERE files_fts MATCH ?
             ORDER BY rank LIMIT ?
@@ -124,7 +172,8 @@ class LibraryDB:
         except sqlite3.OperationalError:
             # invalid FTS syntax — fall back to LIKE
             like = f"%{query}%"
-            sql2 = """SELECT id, path, parent_dir, filename, ext, size, mtime, duration
+            sql2 = """SELECT id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                             title, year, series, season, episode, artist, album, track
                       FROM files
                       WHERE filename LIKE ? OR parent_dir LIKE ?
                       ORDER BY filename LIMIT ?"""
@@ -134,11 +183,13 @@ class LibraryDB:
         """Files inside a folder. recursive=True walks subdirectories."""
         if recursive:
             like = dir_path.rstrip("/") + "/%"
-            sql = """SELECT id, path, parent_dir, filename, ext, size, mtime, duration
+            sql = """SELECT id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                            title, year, series, season, episode, artist, album, track
                      FROM files WHERE path LIKE ? ORDER BY path"""
             args = (like,)
         else:
-            sql = """SELECT id, path, parent_dir, filename, ext, size, mtime, duration
+            sql = """SELECT id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                            title, year, series, season, episode, artist, album, track
                      FROM files WHERE parent_dir = ? ORDER BY filename"""
             args = (dir_path,)
         return [FileRow(*r) for r in self.conn.execute(sql, args)]
@@ -171,7 +222,8 @@ class LibraryDB:
             )
 
     def load_queue(self) -> list[FileRow]:
-        sql = """SELECT f.id, f.path, f.parent_dir, f.filename, f.ext, f.size, f.mtime, f.duration
+        sql = """SELECT f.id, f.library_id, f.path, f.parent_dir, f.filename, f.ext, f.size, f.mtime, f.duration,
+                        f.title, f.year, f.series, f.season, f.episode, f.artist, f.album, f.track
                  FROM queue q JOIN files f ON f.id = q.file_id
                  ORDER BY q.pos"""
         return [FileRow(*r) for r in self.conn.execute(sql)]

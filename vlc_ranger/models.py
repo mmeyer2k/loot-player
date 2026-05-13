@@ -8,6 +8,7 @@ from PyQt6.QtGui import QStandardItem, QStandardItemModel
 @dataclass
 class FileRow:
     id: int
+    library_id: Optional[int]
     path: str
     parent_dir: str
     filename: str
@@ -15,6 +16,14 @@ class FileRow:
     size: int
     mtime: int
     duration: Optional[float]
+    title: Optional[str] = None
+    year: Optional[int] = None
+    series: Optional[str] = None
+    season: Optional[int] = None
+    episode: Optional[int] = None
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    track: Optional[int] = None
 
 
 class QueueModel(QStandardItemModel):

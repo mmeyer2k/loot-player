@@ -249,7 +249,8 @@ class MainWindow(QMainWindow):
         if not ids:
             return []
         placeholders = ",".join("?" * len(ids))
-        sql = f"""SELECT id, path, parent_dir, filename, ext, size, mtime, duration
+        sql = f"""SELECT id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                         title, year, series, season, episode, artist, album, track
                   FROM files WHERE id IN ({placeholders})"""
         return [FileRow(*r) for r in self.db.conn.execute(sql, ids)]
 
