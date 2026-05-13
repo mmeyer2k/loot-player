@@ -94,8 +94,77 @@ class LibraryDB:
         self.conn = sqlite3.connect(str(db_path))
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
+        self._pre_schema_migrate()
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _pre_schema_migrate(self) -> None:
+        """Adjust legacy v0 tables so SCHEMA's CREATE-IF-NOT-EXISTS calls
+        (which add new indexes/columns) succeed before the post-schema data
+        migration runs."""
+        has_files = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='files'"
+        ).fetchone() is not None
+        if has_files:
+            cols = {r[1] for r in self.conn.execute("PRAGMA table_info(files)")}
+            # v0 lacked library_id and the richer metadata columns; add anything missing.
+            v1_extra_cols = [
+                ("library_id", "INTEGER REFERENCES libraries(id) ON DELETE CASCADE"),
+                ("title", "TEXT"),
+                ("year", "INTEGER"),
+                ("series", "TEXT"),
+                ("season", "INTEGER"),
+                ("episode", "INTEGER"),
+                ("artist", "TEXT"),
+                ("album", "TEXT"),
+                ("track", "INTEGER"),
+            ]
+            for name, decl in v1_extra_cols:
+                if name not in cols:
+                    self.conn.execute(f"ALTER TABLE files ADD COLUMN {name} {decl}")
+
+    def _migrate(self) -> None:
+        v = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if v < 1:
+            self._migrate_v0_to_v1()
+            self.conn.execute("PRAGMA user_version = 1")
+            self.conn.commit()
+
+    def _migrate_v0_to_v1(self) -> None:
+        """Move existing `roots` rows into a Default library and backfill files.library_id."""
+        has_roots = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='roots'"
+        ).fetchone() is not None
+        if not has_roots:
+            return
+
+        old_roots = [r[0] for r in self.conn.execute("SELECT path FROM roots")]
+        if old_roots:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO libraries(name, type, added) VALUES (?, ?, ?)",
+                ("Default", "generic", int(time.time())),
+            )
+            lib_id = self.conn.execute(
+                "SELECT id FROM libraries WHERE name='Default'"
+            ).fetchone()[0]
+            for r in old_roots:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO library_folders(library_id, path) VALUES (?, ?)",
+                    (lib_id, r),
+                )
+            # Sync the FTS shadow table with existing pre-v1 file rows so the
+            # post-UPDATE trigger has consistent state to delete-then-reinsert.
+            self.conn.execute("INSERT INTO files_fts(files_fts) VALUES('rebuild')")
+            # Backfill: each existing file gets library_id of the deepest matching folder.
+            self.conn.execute("""
+                UPDATE files SET library_id = (
+                    SELECT lf.library_id FROM library_folders lf
+                    WHERE files.path LIKE lf.path || '/%'
+                    ORDER BY length(lf.path) DESC LIMIT 1
+                ) WHERE library_id IS NULL
+            """)
+        self.conn.execute("DROP TABLE roots")
 
     # roots ----------------------------------------------------------------
     # NOTE: These methods bridge the legacy "roots" concept to the v1
