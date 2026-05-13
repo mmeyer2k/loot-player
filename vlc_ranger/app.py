@@ -168,10 +168,7 @@ class MainWindow(QMainWindow):
 
     # First-load --------------------------------------------------------
     def _restore_state(self):
-        # rebuild folder tree from indexed roots
-        roots = self.db.list_roots()
-        for r in roots:
-            self._add_root_node(r)
+        # Library-aware sidebar arrives in Task 14; folder tree stays empty for now.
         # restore persisted queue
         self.queue_model.append(self.db.load_queue())
 
@@ -214,32 +211,25 @@ class MainWindow(QMainWindow):
         self._fill_results(self.db.search(text))
 
     # Scanning ----------------------------------------------------------
+    # NOTE: These three methods are TEMPORARY stubs. The real library-aware
+    # scan UI ships in Task 14 alongside the new sidebar/editor dialog.
     def _scan_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Pick a root to index")
-        if not path:
-            return
-        self.db.add_root(path)
-        if not any(self.folder_model.item(i).text() == path
-                   for i in range(self.folder_model.rowCount())):
-            self._add_root_node(path)
-        self._start_scan(path)
+        QMessageBox.information(
+            self, "Library editor needed",
+            "Scan-by-library lands when the new sidebar UI ships (Tasks 12-14).",
+        )
 
     def _rescan_all(self):
-        for root in self.db.list_roots():
-            self._start_scan(root)
+        QMessageBox.information(
+            self, "Library editor needed",
+            "Scan-by-library lands when the new sidebar UI ships (Tasks 12-14).",
+        )
 
     def _start_scan(self, root: str):
-        if self.scanner and self.scanner.isRunning():
-            QMessageBox.information(self, "Busy", "A scan is already running.")
-            return
-        self.scanner = Scanner(self.db.db_path, root)
-        self.scanner.progress.connect(
-            lambda n, d: self.statusBar().showMessage(f"Scanning {n}: {d}")
+        QMessageBox.information(
+            self, "Library editor needed",
+            "Scan-by-library lands when the new sidebar UI ships (Tasks 12-14).",
         )
-        self.scanner.finished_scan.connect(
-            lambda total: self.statusBar().showMessage(f"Indexed {total} file(s) under {root}")
-        )
-        self.scanner.start()
 
     # Selection helpers -------------------------------------------------
     def _selected_result_rows(self) -> list[FileRow]:

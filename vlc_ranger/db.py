@@ -180,40 +180,48 @@ class LibraryDB:
             """)
         self.conn.execute("DROP TABLE roots")
 
-    # roots ----------------------------------------------------------------
-    # NOTE: These methods bridge the legacy "roots" concept to the v1
-    # libraries/library_folders schema. A real library-aware API arrives in
-    # Task 11; for now we keep a single implicit "Default" generic library
-    # so the existing UI continues to work on a fresh v1 DB.
-    def _default_library_id(self) -> int:
-        row = self.conn.execute(
-            "SELECT id FROM libraries WHERE name=?", ("Default",)
-        ).fetchone()
-        if row:
-            return row[0]
+    # libraries -----------------------------------------------------------
+    def add_library(self, name: str, type_: str) -> int:
         cur = self.conn.execute(
             "INSERT INTO libraries(name, type, added) VALUES (?, ?, ?)",
-            ("Default", "generic", int(time.time())),
+            (name, type_, int(time.time())),
         )
         self.conn.commit()
         return cur.lastrowid
 
-    def add_root(self, path: str) -> int:
-        lib_id = self._default_library_id()
+    def update_library(self, lib_id: int, name: str, type_: str) -> None:
         self.conn.execute(
-            "INSERT OR IGNORE INTO library_folders(library_id, path) VALUES (?, ?)",
-            (lib_id, path),
+            "UPDATE libraries SET name=?, type=? WHERE id=?", (name, type_, lib_id)
         )
         self.conn.commit()
-        row = self.conn.execute(
-            "SELECT id FROM library_folders WHERE path=?", (path,)
-        ).fetchone()
-        return row[0]
 
-    def list_roots(self) -> list[str]:
-        return [r[0] for r in self.conn.execute(
-            "SELECT path FROM library_folders ORDER BY path"
-        )]
+    def delete_library(self, lib_id: int) -> None:
+        self.conn.execute("DELETE FROM libraries WHERE id=?", (lib_id,))
+        self.conn.commit()
+
+    def list_libraries(self) -> list[tuple[int, str, str]]:
+        return list(self.conn.execute("SELECT id, name, type FROM libraries ORDER BY name"))
+
+    def add_library_folder(self, lib_id: int, path: str) -> None:
+        self.conn.execute(
+            "INSERT OR IGNORE INTO library_folders(library_id, path) VALUES (?, ?)",
+            (lib_id, path.rstrip("/") or path),
+        )
+        self.conn.commit()
+
+    def remove_library_folder(self, folder_id: int) -> None:
+        self.conn.execute("DELETE FROM library_folders WHERE id=?", (folder_id,))
+        self.conn.commit()
+
+    def library_folders(self, lib_id: int) -> list[tuple[int, str]]:
+        return list(self.conn.execute(
+            "SELECT id, path FROM library_folders WHERE library_id=? ORDER BY path",
+            (lib_id,),
+        ))
+
+    def get_library_type(self, lib_id: int) -> str:
+        row = self.conn.execute("SELECT type FROM libraries WHERE id=?", (lib_id,)).fetchone()
+        return row[0] if row else "generic"
 
     # files ----------------------------------------------------------------
     def upsert_files(self, rows: Iterable[tuple]) -> None:
