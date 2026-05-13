@@ -58,9 +58,9 @@ def parse_tv(filename: str, parent_dir: str) -> dict[str, Any]:
     m = _SXXEYY.search(base) or _ONE_X.search(base)
     if m:
         season, episode = int(m.group(1)), int(m.group(2))
-        series = _normalize_title(base[:m.start()])
-        if series:
-            return {"series": series, "season": season, "episode": episode}
+        series = _normalize_title(base[:m.start()]) \
+                 or os.path.basename(parent_dir.rstrip("/"))
+        return {"series": series, "season": season, "episode": episode}
 
     folder_name = os.path.basename(parent_dir.rstrip("/"))
     season_match = _SEASON_FOLDER.match(folder_name)

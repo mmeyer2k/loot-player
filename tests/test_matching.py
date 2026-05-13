@@ -96,6 +96,21 @@ def test_tv_unsorted_fallback():
     assert out["episode"] is None
 
 
+def test_tv_sxxeyy_at_start_uses_folder_for_series():
+    # Filename starts with SxxEyy; series comes from the folder.
+    out = parse_tv("S01E01.mkv", parent_dir="/tv/Breaking Bad")
+    assert out["series"] == "Breaking Bad"
+    assert out["season"] == 1
+    assert out["episode"] == 1
+
+
+def test_tv_one_x_at_start_uses_folder_for_series():
+    out = parse_tv("1x07 Foo.mkv", parent_dir="/tv/Severance")
+    assert out["series"] == "Severance"
+    assert out["season"] == 1
+    assert out["episode"] == 7
+
+
 from vlc_ranger.matching import parse_music
 
 
