@@ -176,6 +176,25 @@ class MainWindow(QMainWindow):
     def _restore_state(self):
         self.queue_model.append(self.db.load_queue())
 
+        from PyQt6.QtCore import QByteArray
+
+        def _restore(key, applier, decoder=None):
+            raw = self.db.ui_get(key)
+            if raw is not None:
+                try:
+                    applier(decoder(raw) if decoder else raw)
+                except Exception:
+                    pass
+
+        _restore("splitter.root", self.root_split.restoreState,
+                 lambda s: QByteArray.fromHex(s.encode()))
+        _restore("splitter.center", self.center_split.restoreState,
+                 lambda s: QByteArray.fromHex(s.encode()))
+        _restore("queue_panel_visible", lambda v: self.queue_action.setChecked(v == "1"))
+        _restore("sidebar_visible", lambda v: self.sidebar.setVisible(v == "1"))
+        _restore("selected_library_id",
+                 lambda v: self.browse.show_library(int(v)) if v else None)
+
     # Library handlers --------------------------------------------------
     def _new_library(self):
         from vlc_ranger.ui.library_editor import LibraryEditor
@@ -301,6 +320,12 @@ class MainWindow(QMainWindow):
         if self.scanner and self.scanner.isRunning():
             self.scanner.cancel()
             self.scanner.wait(2000)
+        self.db.ui_set("splitter.root", self.root_split.saveState().toHex().data().decode())
+        self.db.ui_set("splitter.center", self.center_split.saveState().toHex().data().decode())
+        self.db.ui_set("queue_panel_visible", "1" if self.queue_panel.isVisible() else "0")
+        self.db.ui_set("sidebar_visible", "1" if self.sidebar.isVisible() else "0")
+        if self.browse.current_library_id is not None:
+            self.db.ui_set("selected_library_id", str(self.browse.current_library_id))
         super().closeEvent(ev)
 
 

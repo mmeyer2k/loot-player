@@ -382,3 +382,16 @@ class LibraryDB:
                  FROM queue q JOIN files f ON f.id = q.file_id
                  ORDER BY q.pos"""
         return [FileRow(*r) for r in self.conn.execute(sql)]
+
+    # ui_state -------------------------------------------------------------
+    def ui_get(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM ui_state WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def ui_set(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO ui_state(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+        self.conn.commit()
