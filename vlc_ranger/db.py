@@ -308,6 +308,32 @@ class LibraryDB:
             args = (library_id, series, season)
         return [FileRow(*r) for r in self.conn.execute(sql, args)]
 
+    def music_artists(self, library_id: int) -> list[tuple[str, int]]:
+        return list(self.conn.execute(
+            """SELECT COALESCE(artist,'(Unknown artist)'), COUNT(*) FROM files
+               WHERE library_id=? GROUP BY 1 ORDER BY 1""",
+            (library_id,),
+        ))
+
+    def music_albums(self, library_id: int, artist: str) -> list[tuple[str, int]]:
+        return list(self.conn.execute(
+            """SELECT COALESCE(album,'(Unknown album)'), COUNT(*) FROM files
+               WHERE library_id=? AND COALESCE(artist,'(Unknown artist)')=?
+               GROUP BY 1 ORDER BY 1""",
+            (library_id, artist),
+        ))
+
+    def music_tracks(self, library_id: int, artist: str, album: str) -> list[FileRow]:
+        cols = """id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                  title, year, series, season, episode, artist, album, track"""
+        return [FileRow(*r) for r in self.conn.execute(
+            f"""SELECT {cols} FROM files
+                WHERE library_id=? AND COALESCE(artist,'(Unknown artist)')=?
+                  AND COALESCE(album,'(Unknown album)')=?
+                ORDER BY track, filename""",
+            (library_id, artist, album),
+        )]
+
     def files_under(self, dir_path: str, recursive: bool = True) -> list[FileRow]:
         """Files inside a folder. recursive=True walks subdirectories."""
         if recursive:

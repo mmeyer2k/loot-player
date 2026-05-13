@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QLineEdit, QStackedWidget, QVBoxLayout, QWidget
 from vlc_ranger.db import LibraryDB
 from vlc_ranger.ui.views.generic import GenericView
 from vlc_ranger.ui.views.movies import MoviesView
+from vlc_ranger.ui.views.music import MusicView
 from vlc_ranger.ui.views.tv import TVView
 
 
@@ -33,8 +34,10 @@ class BrowseRouter(QWidget):
         self.stack.addWidget(self.movies)
         self.tv = TVView(self.db)
         self.stack.addWidget(self.tv)
+        self.music = MusicView(self.db)
+        self.stack.addWidget(self.music)
 
-        for v in (self.generic, self.movies, self.tv):
+        for v in (self.generic, self.movies, self.tv, self.music):
             v.play_requested.connect(self.play_requested.emit)
             v.queue_end_requested.connect(self.queue_end_requested.emit)
             v.queue_front_requested.connect(self.queue_front_requested.emit)
@@ -54,6 +57,9 @@ class BrowseRouter(QWidget):
         elif type_ == "movies":
             self.movies.set_rows(self.db.files_in_library(library_id))
             self.stack.setCurrentWidget(self.movies)
+        elif type_ == "music":
+            self.music.set_library(library_id)
+            self.stack.setCurrentWidget(self.music)
         else:
             self.generic.set_rows(self.db.files_in_library(library_id))
             self.stack.setCurrentWidget(self.generic)
