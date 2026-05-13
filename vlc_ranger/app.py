@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QModelIndex, QTimer
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel,
@@ -47,6 +47,15 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_toolbar()
+
+        QShortcut(QKeySequence("Space"),  self, activated=self._toggle_pause)
+        QShortcut(QKeySequence("F"),      self, activated=self._toggle_fullscreen)
+        QShortcut(QKeySequence("Esc"),    self, activated=lambda: self.isFullScreen() and self.showNormal())
+        QShortcut(QKeySequence("Ctrl+K"), self, activated=lambda: self.browse.search.setFocus())
+        QShortcut(QKeySequence("Ctrl+Q"), self, activated=lambda: self.queue_action.toggle())
+        QShortcut(QKeySequence("Ctrl+B"), self, activated=lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
+        QShortcut(QKeySequence("Backspace"), self, activated=self._backspace_up)
+
         self._restore_state()
 
         # Tick for transport slider + auto-advance
@@ -156,6 +165,12 @@ class MainWindow(QMainWindow):
             self.showNormal()
         else:
             self.showFullScreen()
+
+    def _backspace_up(self):
+        """Forward Backspace to drill-down views that handle it."""
+        current = self.browse.stack.currentWidget()
+        if hasattr(current, "_go_up"):
+            current._go_up()
 
     # First-load --------------------------------------------------------
     def _restore_state(self):
