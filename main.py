@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-import vlc
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QModelIndex, QSize, QTimer
 from PyQt6.QtGui import QAction, QKeySequence, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import (
@@ -40,6 +39,8 @@ from PyQt6.QtWidgets import (
     QFileDialog, QToolBar, QStatusBar, QSlider, QMessageBox, QAbstractItemView,
     QHeaderView, QStyle, QMenu,
 )
+
+from vlc_ranger.player import VlcWidget
 
 # ---------------------------------------------------------------------------
 # Config / paths
@@ -324,59 +325,6 @@ class Scanner(QThread):
         conn.commit()
         conn.close()
         self.finished_scan.emit(total)
-
-
-# ---------------------------------------------------------------------------
-# VLC widget — embeds libVLC into a QFrame
-# ---------------------------------------------------------------------------
-
-class VlcWidget(QFrame):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setAutoFillBackground(True)
-        pal = self.palette()
-        pal.setColor(self.backgroundRole(), Qt.GlobalColor.black)
-        self.setPalette(pal)
-        self.setMinimumSize(QSize(480, 270))
-
-        # libVLC instance. --no-xlib lets it work under Qt cleanly.
-        self.instance = vlc.Instance([
-            "--no-video-title-show",
-            "--quiet",
-        ])
-        self.player = self.instance.media_player_new()
-
-    def attach(self):
-        """Bind libVLC output to this widget's native window. Must be called
-        after the widget is shown so winId() is valid."""
-        wid = int(self.winId())
-        if sys.platform.startswith("linux"):
-            self.player.set_xwindow(wid)
-        elif sys.platform == "win32":
-            self.player.set_hwnd(wid)
-        elif sys.platform == "darwin":
-            self.player.set_nsobject(wid)
-
-    def play_path(self, path: str):
-        media = self.instance.media_new(path)
-        self.player.set_media(media)
-        self.player.play()
-
-    def toggle_pause(self):
-        self.player.pause()
-
-    def stop(self):
-        self.player.stop()
-
-    def set_position(self, frac: float):
-        self.player.set_position(max(0.0, min(1.0, frac)))
-
-    def position(self) -> float:
-        return float(self.player.get_position() or 0.0)
-
-    def is_ended(self) -> bool:
-        return self.player.get_state() == vlc.State.Ended
 
 
 # ---------------------------------------------------------------------------
