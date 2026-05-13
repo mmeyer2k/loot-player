@@ -105,10 +105,19 @@ class MainWindow(QMainWindow):
         center_split.setSizes([600, 250])
         self.center_split = center_split
 
+        from vlc_ranger.ui.queue_panel import QueuePanel
+        self.queue_panel = QueuePanel(self.queue_model)
+        self.queue_panel.play_next_requested.connect(self._play_next_from_queue)
+        self.queue_panel.clear_requested.connect(self._clear_queue)
+        self.queue_panel.remove_requested.connect(self.queue_model.remove_indices)
+        self.queue_panel.remove_requested.connect(lambda *_: self._persist_queue())
+        self.queue_panel.setVisible(False)         # toggled by Ctrl+Q / toolbar button in later tasks
+
         root_split = QSplitter(Qt.Orientation.Horizontal)
         root_split.addWidget(self.sidebar)
         root_split.addWidget(center_split)
-        root_split.setSizes([260, 1140])
+        root_split.addWidget(self.queue_panel)
+        root_split.setSizes([260, 880, 260])
         self.root_split = root_split
         self.setCentralWidget(root_split)
         self.setStatusBar(QStatusBar())
