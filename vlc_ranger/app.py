@@ -6,12 +6,11 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QModelIndex, QTimer
-from PyQt6.QtGui import QAction, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLineEdit, QLabel, QTreeView, QTableView,
-    QFileDialog, QToolBar, QStatusBar, QSlider, QMessageBox, QAbstractItemView,
-    QHeaderView, QStyle, QMenu,
+    QPushButton, QLabel,
+    QStatusBar, QSlider, QMessageBox,
+    QStyle, QMenu,
 )
 
 from vlc_ranger.db import LibraryDB
@@ -46,7 +45,6 @@ class MainWindow(QMainWindow):
         self.current_file: Optional[FileRow] = None
 
         self._build_ui()
-        self._build_toolbar()
         self._restore_state()
 
         # Tick for transport slider + auto-advance
@@ -57,73 +55,25 @@ class MainWindow(QMainWindow):
 
     # UI -------------------------------------------------------------------
     def _build_ui(self):
-        # left: folder tree (top) + search results (middle) + queue (bottom)
-        # right: video + transport
-        self.folder_tree = QTreeView()
-        self.folder_model = QStandardItemModel()
-        self.folder_model.setHorizontalHeaderLabels(["Library"])
-        self.folder_tree.setModel(self.folder_model)
-        self.folder_tree.setHeaderHidden(True)
-        self.folder_tree.expanded.connect(self._on_folder_expand)
-        self.folder_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.folder_tree.customContextMenuRequested.connect(self._folder_menu)
+        from vlc_ranger.ui.sidebar import Sidebar
+        from vlc_ranger.ui.browse import BrowseRouter
 
-        self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search (FTS5: 'breaking bad', 'mkv*', etc.)")
-        self.search_box.textChanged.connect(self._on_search)
+        self.sidebar = Sidebar()
+        self.browse = BrowseRouter(self.db)
 
-        self.results = QTableView()
-        self.results_model = QStandardItemModel()
-        self.results_model.setHorizontalHeaderLabels(["Filename", "Folder"])
-        self.results.setModel(self.results_model)
-        self.results.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.results.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.results.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.results.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.results.doubleClicked.connect(self._play_selected_result)
-        self.results.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.results.customContextMenuRequested.connect(self._results_menu)
+        self.sidebar.library_selected.connect(self.browse.show_library)
+        self.sidebar.new_library_requested.connect(self._new_library)
+        self.sidebar.edit_library_requested.connect(self._edit_library)
+        self.sidebar.rescan_library_requested.connect(self._rescan_library)
+        self.sidebar.delete_library_requested.connect(self._delete_library)
+
+        self.browse.play_requested.connect(self._play)
+        self.browse.queue_end_requested.connect(self._add_to_queue_end)
+        self.browse.queue_front_requested.connect(self._add_to_queue_front)
+        self.browse.play_next_requested.connect(self._play_next)
 
         self.queue_model = QueueModel()
-        self.queue_view = QTableView()
-        self.queue_view.setModel(self.queue_model)
-        self.queue_view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.queue_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.queue_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.queue_view.doubleClicked.connect(self._jump_queue)
-        self.queue_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.queue_view.customContextMenuRequested.connect(self._queue_menu)
 
-        queue_buttons = QHBoxLayout()
-        for label, slot in [
-            ("▶ Play next", self._play_next_from_queue),
-            ("Clear", self._clear_queue),
-            ("Remove", self._remove_selected_queue),
-        ]:
-            b = QPushButton(label)
-            b.clicked.connect(slot)
-            queue_buttons.addWidget(b)
-
-        queue_box = QWidget()
-        ql = QVBoxLayout(queue_box)
-        ql.setContentsMargins(0, 0, 0, 0)
-        ql.addWidget(QLabel("Queue"))
-        ql.addWidget(self.queue_view)
-        ql.addLayout(queue_buttons)
-
-        left_split = QSplitter(Qt.Orientation.Vertical)
-        # results pane wraps search box + table
-        results_wrap = QWidget()
-        rl = QVBoxLayout(results_wrap)
-        rl.setContentsMargins(0, 0, 0, 0)
-        rl.addWidget(self.search_box)
-        rl.addWidget(self.results)
-        left_split.addWidget(self.folder_tree)
-        left_split.addWidget(results_wrap)
-        left_split.addWidget(queue_box)
-        left_split.setSizes([250, 350, 250])
-
-        # right: video + transport
         self.video = VlcWidget()
         self.transport = QSlider(Qt.Orientation.Horizontal)
         self.transport.setRange(0, 1000)
@@ -132,9 +82,9 @@ class MainWindow(QMainWindow):
 
         controls = QHBoxLayout()
         for icon, slot in [
-            (QStyle.StandardPixmap.SP_MediaPlay, self._toggle_pause),
-            (QStyle.StandardPixmap.SP_MediaStop, self.video.stop),
-            (QStyle.StandardPixmap.SP_MediaSkipForward, self._play_next_from_queue),
+            (QStyle.StandardPixmap.SP_MediaPlay,         self._toggle_pause),
+            (QStyle.StandardPixmap.SP_MediaStop,         self.video.stop),
+            (QStyle.StandardPixmap.SP_MediaSkipForward,  self._play_next_from_queue),
         ]:
             b = QPushButton()
             b.setIcon(self.style().standardIcon(icon))
@@ -142,107 +92,103 @@ class MainWindow(QMainWindow):
             controls.addWidget(b)
         controls.addWidget(self.transport, 1)
 
-        right = QWidget()
-        rlay = QVBoxLayout(right)
-        rlay.addWidget(self.video, 1)
-        rlay.addWidget(self.now_playing)
-        rlay.addLayout(controls)
+        video_wrap = QWidget()
+        vw = QVBoxLayout(video_wrap)
+        vw.setContentsMargins(0, 0, 0, 0)
+        vw.addWidget(self.video, 1)
+        vw.addWidget(self.now_playing)
+        vw.addLayout(controls)
+
+        center_split = QSplitter(Qt.Orientation.Vertical)
+        center_split.addWidget(self.browse)
+        center_split.addWidget(video_wrap)
+        center_split.setSizes([600, 250])
+        self.center_split = center_split
 
         root_split = QSplitter(Qt.Orientation.Horizontal)
-        root_split.addWidget(left_split)
-        root_split.addWidget(right)
-        root_split.setSizes([450, 950])
+        root_split.addWidget(self.sidebar)
+        root_split.addWidget(center_split)
+        root_split.setSizes([260, 1140])
+        self.root_split = root_split
         self.setCentralWidget(root_split)
         self.setStatusBar(QStatusBar())
 
-    def _build_toolbar(self):
-        tb = QToolBar()
-        self.addToolBar(tb)
-        act_scan = QAction("Scan Folder…", self)
-        act_scan.triggered.connect(self._scan_folder)
-        tb.addAction(act_scan)
-
-        act_rescan = QAction("Rescan All", self)
-        act_rescan.triggered.connect(self._rescan_all)
-        tb.addAction(act_rescan)
+        self.sidebar.reload(self.db.list_libraries())
 
     # First-load --------------------------------------------------------
     def _restore_state(self):
-        # Library-aware sidebar arrives in Task 14; folder tree stays empty for now.
-        # restore persisted queue
         self.queue_model.append(self.db.load_queue())
 
-    def _add_root_node(self, path: str):
-        item = QStandardItem(path)
-        item.setData(path, Qt.ItemDataRole.UserRole)
-        # placeholder child so the expand arrow appears
-        item.appendRow(QStandardItem("(loading)"))
-        self.folder_model.appendRow(item)
+    # Library handlers --------------------------------------------------
+    def _new_library(self):
+        from vlc_ranger.ui.library_editor import LibraryEditor
+        dlg = LibraryEditor(self)
+        if dlg.exec() and dlg.result_data:
+            name, type_, folders = dlg.result_data
+            try:
+                lib_id = self.db.add_library(name, type_)
+            except Exception as e:
+                QMessageBox.warning(self, "Couldn't create library", str(e))
+                return
+            for f in folders:
+                self.db.add_library_folder(lib_id, f)
+            self.sidebar.reload(self.db.list_libraries())
+            if folders:
+                self._start_scan_library(lib_id)
 
-    def _on_folder_expand(self, idx: QModelIndex):
-        item = self.folder_model.itemFromIndex(idx)
-        path = item.data(Qt.ItemDataRole.UserRole)
-        if not path:
+    def _edit_library(self, lib_id: int):
+        from vlc_ranger.ui.library_editor import LibraryEditor
+        libs = {i: (n, t) for (i, n, t) in self.db.list_libraries()}
+        name, type_ = libs.get(lib_id, ("", "generic"))
+        folders = [p for (_, p) in self.db.library_folders(lib_id)]
+        dlg = LibraryEditor(self, initial_name=name, initial_type=type_,
+                            initial_folders=folders)
+        if dlg.exec() and dlg.result_data:
+            new_name, new_type, new_folders = dlg.result_data
+            old_set = set(folders)
+            new_set = set(new_folders)
+            added = [f for f in new_folders if f not in old_set]
+            removed = [f for f in folders if f not in new_set]
+            self.db.update_library(lib_id, new_name, new_type)
+            for f in removed:
+                for fid, p in self.db.library_folders(lib_id):
+                    if p == f:
+                        self.db.remove_library_folder(fid)
+                        break
+            for f in added:
+                self.db.add_library_folder(lib_id, f)
+            self.sidebar.reload(self.db.list_libraries())
+            if added or new_type != type_:
+                self._start_scan_library(lib_id)
+
+    def _rescan_library(self, lib_id: int):
+        self._start_scan_library(lib_id)
+
+    def _delete_library(self, lib_id: int):
+        if QMessageBox.question(
+            self, "Delete library?",
+            "This removes the library and all its indexed files (and their queue/watch state). Continue?",
+        ) == QMessageBox.StandardButton.Yes:
+            self.db.delete_library(lib_id)
+            self.sidebar.reload(self.db.list_libraries())
+
+    def _start_scan_library(self, lib_id: int):
+        if self.scanner and self.scanner.isRunning():
+            QMessageBox.information(self, "Busy", "A scan is already running.")
             return
-        # Replace children only if first child is placeholder.
-        if item.rowCount() == 1 and item.child(0).text() == "(loading)":
-            item.removeRows(0, 1)
-            for child in self.db.child_dirs(path):
-                ch = QStandardItem(os.path.basename(child) or child)
-                ch.setData(child, Qt.ItemDataRole.UserRole)
-                ch.appendRow(QStandardItem("(loading)"))
-                item.appendRow(ch)
-        # Also populate results pane with this folder's files (recursive).
-        self._fill_results(self.db.files_under(path, recursive=True))
-
-    def _fill_results(self, files: list[FileRow]):
-        self.results_model.setRowCount(0)
-        for f in files:
-            row = [QStandardItem(f.filename), QStandardItem(f.parent_dir)]
-            for it in row:
-                it.setData(f.id, Qt.ItemDataRole.UserRole)
-            self.results_model.appendRow(row)
-        self.statusBar().showMessage(f"{len(files)} file(s)")
-
-    def _on_search(self, text: str):
-        if not text.strip():
-            self.results_model.setRowCount(0)
+        folders = [p for (_, p) in self.db.library_folders(lib_id)]
+        if not folders:
             return
-        self._fill_results(self.db.search(text))
-
-    # Scanning ----------------------------------------------------------
-    # NOTE: These three methods are TEMPORARY stubs. The real library-aware
-    # scan UI ships in Task 14 alongside the new sidebar/editor dialog.
-    def _scan_folder(self):
-        QMessageBox.information(
-            self, "Library editor needed",
-            "Scan-by-library lands when the new sidebar UI ships (Tasks 12-14).",
+        type_ = self.db.get_library_type(lib_id)
+        self.scanner = Scanner(self.db.db_path, lib_id, type_, folders)
+        self.scanner.progress.connect(
+            lambda n, d: self.statusBar().showMessage(f"Scanning {n}: {d}")
         )
-
-    def _rescan_all(self):
-        QMessageBox.information(
-            self, "Library editor needed",
-            "Scan-by-library lands when the new sidebar UI ships (Tasks 12-14).",
+        self.scanner.finished_scan.connect(
+            lambda total: (self.statusBar().showMessage(f"Indexed {total} file(s)"),
+                           self.browse.show_library(lib_id))
         )
-
-    def _start_scan(self, root: str):
-        QMessageBox.information(
-            self, "Library editor needed",
-            "Scan-by-library lands when the new sidebar UI ships (Tasks 12-14).",
-        )
-
-    # Selection helpers -------------------------------------------------
-    def _selected_result_rows(self) -> list[FileRow]:
-        ids = []
-        for idx in self.results.selectionModel().selectedRows():
-            ids.append(self.results_model.item(idx.row(), 0).data(Qt.ItemDataRole.UserRole))
-        if not ids:
-            return []
-        placeholders = ",".join("?" * len(ids))
-        sql = f"""SELECT id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
-                         title, year, series, season, episode, artist, album, track
-                  FROM files WHERE id IN ({placeholders})"""
-        return [FileRow(*r) for r in self.db.conn.execute(sql, ids)]
+        self.scanner.start()
 
     # Queue ops --------------------------------------------------------
     def _add_to_queue_end(self, files: list[FileRow]):
@@ -265,76 +211,11 @@ class MainWindow(QMainWindow):
         self.queue_model.clear_queue()
         self._persist_queue()
 
-    def _remove_selected_queue(self):
-        rows = [i.row() for i in self.queue_view.selectionModel().selectedRows()]
-        self.queue_model.remove_indices(rows)
-        self._persist_queue()
-
     def _play_next_from_queue(self):
         f = self.queue_model.take_next()
         self._persist_queue()
         if f:
             self._play(f)
-
-    def _jump_queue(self, idx: QModelIndex):
-        # play the double-clicked queue item, remove items above it
-        row = idx.row()
-        # drop all items 0..row inclusive, then prepend the chosen one back? simpler: pop until we reach it
-        for _ in range(row):
-            self.queue_model.take_next()
-        f = self.queue_model.take_next()
-        self._persist_queue()
-        if f:
-            self._play(f)
-
-    # Context menus ----------------------------------------------------
-    def _results_menu(self, point):
-        files = self._selected_result_rows()
-        if not files:
-            return
-        menu = QMenu(self)
-        menu.addAction("▶ Play now", lambda: self._play(files[0]))
-        menu.addAction("Add to end of queue",   lambda: self._add_to_queue_end(files))
-        menu.addAction("Add to front of queue", lambda: self._add_to_queue_front(files))
-        menu.addAction("Play next",             lambda: self._play_next(files))
-        menu.exec(self.results.viewport().mapToGlobal(point))
-
-    def _folder_menu(self, point):
-        idx = self.folder_tree.indexAt(point)
-        if not idx.isValid():
-            return
-        item = self.folder_model.itemFromIndex(idx)
-        path = item.data(Qt.ItemDataRole.UserRole)
-        if not path:
-            return
-        files = self.db.files_under(path, recursive=True)
-        if not files:
-            return
-        menu = QMenu(self)
-        menu.addAction(f"Queue folder ({len(files)} files) — end",
-                       lambda: self._add_to_queue_end(files))
-        menu.addAction("Queue folder — front",
-                       lambda: self._add_to_queue_front(files))
-        menu.addAction("Play folder now (replaces queue)",
-                       lambda: self._play_folder(files))
-        menu.exec(self.folder_tree.viewport().mapToGlobal(point))
-
-    def _queue_menu(self, point):
-        menu = QMenu(self)
-        menu.addAction("Remove", self._remove_selected_queue)
-        menu.addAction("Clear queue", self._clear_queue)
-        menu.exec(self.queue_view.viewport().mapToGlobal(point))
-
-    def _play_folder(self, files: list[FileRow]):
-        self.queue_model.clear_queue()
-        self.queue_model.append(files)
-        self._persist_queue()
-        self._play_next_from_queue()
-
-    def _play_selected_result(self, idx: QModelIndex):
-        files = self._selected_result_rows()
-        if files:
-            self._play(files[0])
 
     # Playback ---------------------------------------------------------
     def _play(self, f: FileRow):

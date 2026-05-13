@@ -270,6 +270,12 @@ class LibraryDB:
                       ORDER BY filename LIMIT ?"""
             return [FileRow(*r) for r in self.conn.execute(sql2, (like, like, limit))]
 
+    def files_in_library(self, library_id: int) -> list[FileRow]:
+        sql = """SELECT id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                        title, year, series, season, episode, artist, album, track
+                 FROM files WHERE library_id=? ORDER BY filename"""
+        return [FileRow(*r) for r in self.conn.execute(sql, (library_id,))]
+
     def files_under(self, dir_path: str, recursive: bool = True) -> list[FileRow]:
         """Files inside a folder. recursive=True walks subdirectories."""
         if recursive:
