@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QModelIndex, QTimer
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel,
     QStatusBar, QSlider, QMessageBox,
-    QStyle, QMenu,
+    QStyle, QMenu, QToolBar,
 )
 
 from vlc_ranger.db import LibraryDB
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
         self.current_file: Optional[FileRow] = None
 
         self._build_ui()
+        self._build_toolbar()
         self._restore_state()
 
         # Tick for transport slider + auto-advance
@@ -123,6 +125,37 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
 
         self.sidebar.reload(self.db.list_libraries())
+
+    def _build_toolbar(self):
+        tb = QToolBar()
+        self.addToolBar(tb)
+        new_lib = QAction("+ New Library", self)
+        new_lib.triggered.connect(self._new_library)
+        tb.addAction(new_lib)
+
+        rescan = QAction("⟳ Rescan current", self)
+        rescan.triggered.connect(self._rescan_current_library)
+        tb.addAction(rescan)
+
+        self.queue_action = QAction("Queue", self)
+        self.queue_action.setCheckable(True)
+        self.queue_action.toggled.connect(self.queue_panel.setVisible)
+        tb.addAction(self.queue_action)
+
+        fullscreen = QAction("⛶ Fullscreen", self)
+        fullscreen.triggered.connect(self._toggle_fullscreen)
+        tb.addAction(fullscreen)
+
+    def _rescan_current_library(self):
+        lib_id = self.browse.current_library_id
+        if lib_id is not None:
+            self._start_scan_library(lib_id)
+
+    def _toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
 
     # First-load --------------------------------------------------------
     def _restore_state(self):
