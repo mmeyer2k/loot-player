@@ -270,6 +270,36 @@ class LibraryDB:
                       ORDER BY filename LIMIT ?"""
             return [FileRow(*r) for r in self.conn.execute(sql2, (like, like, limit))]
 
+    def search_with_library(self, query: str, limit: int = 500) -> list[tuple[FileRow, str]]:
+        """Like `search`, but each row is paired with the owning library's name."""
+        if not query.strip():
+            return []
+        cols = """f.id, f.library_id, f.path, f.parent_dir, f.filename, f.ext, f.size,
+                  f.mtime, f.duration, f.title, f.year, f.series, f.season, f.episode,
+                  f.artist, f.album, f.track, COALESCE(l.name, '')"""
+        sql = f"""
+            SELECT {cols}
+            FROM files_fts JOIN files f ON f.id = files_fts.rowid
+            LEFT JOIN libraries l ON l.id = f.library_id
+            WHERE files_fts MATCH ?
+            ORDER BY rank LIMIT ?
+        """
+        try:
+            out = []
+            for r in self.conn.execute(sql, (query, limit)):
+                out.append((FileRow(*r[:-1]), r[-1]))
+            return out
+        except sqlite3.OperationalError:
+            like = f"%{query}%"
+            sql2 = f"""SELECT {cols} FROM files f
+                       LEFT JOIN libraries l ON l.id = f.library_id
+                       WHERE f.filename LIKE ? OR f.parent_dir LIKE ?
+                       ORDER BY f.filename LIMIT ?"""
+            out = []
+            for r in self.conn.execute(sql2, (like, like, limit)):
+                out.append((FileRow(*r[:-1]), r[-1]))
+            return out
+
     def files_in_library(self, library_id: int) -> list[FileRow]:
         sql = """SELECT id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
                         title, year, series, season, episode, artist, album, track

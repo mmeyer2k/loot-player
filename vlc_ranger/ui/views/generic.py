@@ -19,7 +19,6 @@ class GenericView(QWidget):
         super().__init__(parent)
         self.table = QTableView()
         self.model = QStandardItemModel()
-        self.model.setHorizontalHeaderLabels(["Filename", "Folder"])
         self.table.setModel(self.model)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -28,20 +27,37 @@ class GenericView(QWidget):
         self.table.doubleClicked.connect(self._double)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
-
         self._rows: list[FileRow] = []
-
+        self._mode_search = False
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.table)
+        self._set_headers(False)
+
+    def _set_headers(self, search_mode: bool):
+        self._mode_search = search_mode
+        if search_mode:
+            self.model.setHorizontalHeaderLabels(["Filename", "Folder", "Library"])
+            self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        else:
+            self.model.setHorizontalHeaderLabels(["Filename", "Folder"])
 
     def set_rows(self, rows: list[FileRow]):
+        self._set_headers(False)
         self._rows = rows
         self.model.setRowCount(0)
         for f in rows:
+            self.model.appendRow([QStandardItem(f.filename), QStandardItem(f.parent_dir)])
+
+    def set_search_rows(self, rows: list[tuple[FileRow, str]]):
+        self._set_headers(True)
+        self._rows = [r[0] for r in rows]
+        self.model.setRowCount(0)
+        for f, libname in rows:
             self.model.appendRow([
                 QStandardItem(f.filename),
                 QStandardItem(f.parent_dir),
+                QStandardItem(libname),
             ])
 
     def _double(self, idx):

@@ -65,6 +65,10 @@ class BrowseRouter(QWidget):
             self.stack.setCurrentWidget(self.generic)
 
     def _on_search(self, text: str):
-        rows = self.db.search(text) if text.strip() else []
-        self.generic.set_rows(rows)
+        if not text.strip():
+            if self.current_library_id is not None:
+                self.show_library(self.current_library_id)
+            return
+        rows = self.db.search_with_library(text)
+        self.generic.set_search_rows(rows)
         self.stack.setCurrentWidget(self.generic)
