@@ -39,7 +39,7 @@ def data_dir() -> Path:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("vlc-library")
+        self.setWindowTitle(APP_NAME)
         self.resize(1400, 850)
         self.db = LibraryDB(data_dir() / "library.db")
         self.scanner: Optional[Scanner] = None
