@@ -19,14 +19,21 @@ from vlc_ranger.models import FileRow, QueueModel
 from vlc_ranger.player import VlcWidget
 from vlc_ranger.scanner import Scanner
 
-APP_NAME = "vlc-library"
+APP_NAME = "vlc-ranger"
+OLD_APP_NAME = "vlc-library"
 
 
 def data_dir() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    p = Path(base) / APP_NAME
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    base = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+    new = base / APP_NAME
+    old = base / OLD_APP_NAME
+    if new.exists():
+        return new
+    if old.exists():
+        os.rename(old, new)        # atomic on the same filesystem
+        return new
+    new.mkdir(parents=True, exist_ok=True)
+    return new
 
 
 class MainWindow(QMainWindow):
