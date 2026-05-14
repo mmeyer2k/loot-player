@@ -119,7 +119,12 @@ class MainWindow(QMainWindow):
         root_split.setStretchFactor(2, 0)
         self.root_split = root_split
         self.setCentralWidget(root_split)
-        self.setStatusBar(QStatusBar())
+
+        # Status bar auto-hides whenever it has no message.
+        sb = QStatusBar()
+        self.setStatusBar(sb)
+        sb.messageChanged.connect(self._update_status_visibility)
+        self._update_status_visibility(sb.currentMessage())
 
     def _build_transport_bar(self) -> QWidget:
         """Slim VLC-style bottom transport: seek slider on top row;
@@ -232,11 +237,16 @@ class MainWindow(QMainWindow):
 
     def _show_chrome(self):
         self.tree.setVisible(True)
-        self.statusBar().setVisible(True)
         self.now_playing.setVisible(True)
         self.controls_wrap.setVisible(True)
         self._update_queue_visibility()       # auto rule for queue panel
+        self._update_status_visibility(self.statusBar().currentMessage())
         self._chrome_hidden = False
+
+    def _update_status_visibility(self, message: str):
+        if getattr(self, "_chrome_hidden", False):
+            return
+        self.statusBar().setVisible(bool(message))
 
     def _toggle_fullscreen(self):
         if self.isFullScreen():
