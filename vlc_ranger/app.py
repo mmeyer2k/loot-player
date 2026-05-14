@@ -77,6 +77,13 @@ def data_dir() -> Path:
 
 
 class MainWindow(QMainWindow):
+    _SHUFFLE_CYCLE = ["off", "within", "between"]
+    _SHUFFLE_STYLES = {
+        "off":     ("",                                          "Shuffle: off"),
+        "within":  ("background-color: rgba(255, 200, 0, 0.25);", "Shuffle: within library"),
+        "between": ("background-color: rgba(0, 150, 255, 0.30);", "Shuffle: across all libraries"),
+    }
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_NAME)
@@ -201,6 +208,11 @@ class MainWindow(QMainWindow):
             b.setFixedWidth(28)
             row.addWidget(b)
 
+        self.shuffle_btn = slim_button(text="🔀", slot=self._cycle_shuffle)
+        self.shuffle_btn.setCheckable(True)
+        self.shuffle_btn.setFixedWidth(28)
+        row.addWidget(self.shuffle_btn)
+
         self.time_label = QLabel("--:-- / --:--")
         self.time_label.setStyleSheet("color: palette(mid); font-family: monospace;")
         row.addWidget(self.time_label)
@@ -265,6 +277,18 @@ class MainWindow(QMainWindow):
         self.video.setToolTip("")
         self.tree.set_playing(None)
 
+    def _cycle_shuffle(self):
+        idx = self._SHUFFLE_CYCLE.index(self._shuffle_mode)
+        self._shuffle_mode = self._SHUFFLE_CYCLE[(idx + 1) % len(self._SHUFFLE_CYCLE)]
+        self._apply_shuffle_visual()
+        self.db.ui_set("shuffle_mode", self._shuffle_mode)
+
+    def _apply_shuffle_visual(self):
+        style, tip = self._SHUFFLE_STYLES[self._shuffle_mode]
+        self.shuffle_btn.setStyleSheet(style)
+        self.shuffle_btn.setToolTip(tip)
+        self.shuffle_btn.setChecked(self._shuffle_mode != "off")
+
     def _apply_chrome_visibility(self):
         """Apply current cinema/fullscreen state to all chrome widgets.
 
@@ -320,6 +344,11 @@ class MainWindow(QMainWindow):
                 self.root_split.restoreState(QByteArray.fromHex(raw.encode()))
             except Exception:
                 pass
+
+        mode = self.db.ui_get("shuffle_mode")
+        if mode in self._SHUFFLE_CYCLE:
+            self._shuffle_mode = mode
+        self._apply_shuffle_visual()
 
     # Library handlers --------------------------------------------------
     def _new_library(self):
