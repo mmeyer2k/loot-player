@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QByteArray, QTimer
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel,
+    QPushButton, QLabel, QSizePolicy,
     QStatusBar, QSlider, QMessageBox,
     QStyle, QToolBar,
 )
@@ -80,10 +80,14 @@ class MainWindow(QMainWindow):
 
         # Column 2: video + transport
         self.video = VlcWidget()
+        self.video.double_clicked.connect(self._toggle_fullscreen)
         self.transport = QSlider(Qt.Orientation.Horizontal)
         self.transport.setRange(0, 1000)
         self.transport.sliderMoved.connect(lambda v: self.video.set_position(v / 1000.0))
         self.now_playing = QLabel("Nothing playing")
+        # Allow the column to shrink below the label's natural text width.
+        self.now_playing.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.now_playing.setMinimumWidth(0)
 
         controls = QHBoxLayout()
         for icon, slot in [

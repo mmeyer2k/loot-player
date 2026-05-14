@@ -2,11 +2,13 @@ from __future__ import annotations
 import sys
 
 import vlc
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtWidgets import QFrame
 
 
 class VlcWidget(QFrame):
+    double_clicked = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -47,3 +49,7 @@ class VlcWidget(QFrame):
 
     def is_ended(self) -> bool:
         return self.player.get_state() == vlc.State.Ended
+
+    def mouseDoubleClickEvent(self, ev):
+        self.double_clicked.emit()
+        super().mouseDoubleClickEvent(ev)
