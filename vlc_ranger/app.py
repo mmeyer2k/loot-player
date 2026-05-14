@@ -98,7 +98,7 @@ class MainWindow(QMainWindow):
 
         # Column 3: queue (auto-hidden when empty)
         self.queue_panel = QueuePanel(self.queue_model)
-        self.queue_panel.play_next_requested.connect(self._play_next_from_queue)
+        self.queue_panel.play_next_requested.connect(self._play_next)
         self.queue_panel.clear_requested.connect(self._clear_queue)
         self.queue_panel.remove_requested.connect(self.queue_model.remove_indices)
         self.queue_panel.remove_requested.connect(lambda *_: self._persist_queue())
@@ -158,10 +158,11 @@ class MainWindow(QMainWindow):
                 b.clicked.connect(slot)
             return b
 
+        self.prev_btn = slim_button(QStyle.StandardPixmap.SP_MediaSkipBackward, slot=self._play_prev)
         self.play_pause_btn = slim_button(QStyle.StandardPixmap.SP_MediaPlay, slot=self._toggle_pause)
         self.stop_btn = slim_button(QStyle.StandardPixmap.SP_MediaStop, slot=self._stop)
-        self.next_btn = slim_button(QStyle.StandardPixmap.SP_MediaSkipForward, slot=self._play_next_from_queue)
-        for b in (self.play_pause_btn, self.stop_btn, self.next_btn):
+        self.next_btn = slim_button(QStyle.StandardPixmap.SP_MediaSkipForward, slot=self._play_next)
+        for b in (self.prev_btn, self.play_pause_btn, self.stop_btn, self.next_btn):
             b.setFixedWidth(28)
             row.addWidget(b)
 
@@ -371,11 +372,33 @@ class MainWindow(QMainWindow):
         self.queue_model.clear_queue()
         self._persist_queue()
 
-    def _play_next_from_queue(self):
+    def _play_next(self):
+        """Transport ⏭: queue first, else next folder neighbor."""
         f = self.queue_model.take_next()
         self._persist_queue()
         if f:
             self._play(f)
+            return
+        cur = self.current_file
+        if cur is None or cur.library_id is None:
+            return
+        nxt = self.db.next_file_in_folder(cur.library_id, cur.parent_dir, cur.filename)
+        if nxt:
+            self._play(nxt)
+
+    def _play_prev(self):
+        """Transport ⏮: restart current if > 3s in, else previous folder neighbor."""
+        cur = self.current_file
+        if cur is None:
+            return
+        if self.video.get_time() > 3000:
+            self.video.set_position(0.0)
+            return
+        if cur.library_id is None:
+            return
+        prv = self.db.prev_file_in_folder(cur.library_id, cur.parent_dir, cur.filename)
+        if prv:
+            self._play(prv)
 
     # Playback ---------------------------------------------------------
     def _play(self, f: FileRow):
@@ -397,7 +420,7 @@ class MainWindow(QMainWindow):
         self._update_play_pause_icon()
         if self.current_file and self.video.is_ended():
             self.current_file = None
-            self._play_next_from_queue()
+            self._play_next()
 
     # cleanup ----------------------------------------------------------
     def closeEvent(self, ev):
