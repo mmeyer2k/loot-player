@@ -50,6 +50,29 @@ class VlcWidget(QFrame):
     def is_ended(self) -> bool:
         return self.player.get_state() == vlc.State.Ended
 
+    def is_playing(self) -> bool:
+        return self.player.get_state() == vlc.State.Playing
+
+    def set_volume(self, v: int) -> None:
+        self.player.audio_set_volume(int(v))
+
+    def get_volume(self) -> int:
+        return int(self.player.audio_get_volume() or 0)
+
+    def set_mute(self, m: bool) -> None:
+        self.player.audio_set_mute(bool(m))
+
+    def get_mute(self) -> bool:
+        return bool(self.player.audio_get_mute())
+
+    def get_time(self) -> int:
+        """Current playback time in milliseconds; -1 if unknown."""
+        return int(self.player.get_time() if self.player.get_time() is not None else -1)
+
+    def get_length(self) -> int:
+        """Total length in milliseconds; -1 if unknown."""
+        return int(self.player.get_length() if self.player.get_length() is not None else -1)
+
     def mouseDoubleClickEvent(self, ev):
         self.double_clicked.emit()
         super().mouseDoubleClickEvent(ev)

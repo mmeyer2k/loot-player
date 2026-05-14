@@ -81,27 +81,13 @@ class MainWindow(QMainWindow):
         # Column 2: video + transport
         self.video = VlcWidget()
         self.video.double_clicked.connect(self._toggle_fullscreen)
-        self.transport = QSlider(Qt.Orientation.Horizontal)
-        self.transport.setRange(0, 1000)
-        self.transport.sliderMoved.connect(lambda v: self.video.set_position(v / 1000.0))
+        self.video.set_volume(80)
         self.now_playing = QLabel("Nothing playing")
         # Allow the column to shrink below the label's natural text width.
         self.now_playing.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.now_playing.setMinimumWidth(0)
 
-        self.controls_wrap = QWidget()
-        controls = QHBoxLayout(self.controls_wrap)
-        controls.setContentsMargins(0, 0, 0, 0)
-        for icon, slot in [
-            (QStyle.StandardPixmap.SP_MediaPlay,         self._toggle_pause),
-            (QStyle.StandardPixmap.SP_MediaStop,         self.video.stop),
-            (QStyle.StandardPixmap.SP_MediaSkipForward,  self._play_next_from_queue),
-        ]:
-            b = QPushButton()
-            b.setIcon(self.style().standardIcon(icon))
-            b.clicked.connect(slot)
-            controls.addWidget(b)
-        controls.addWidget(self.transport, 1)
+        self.controls_wrap = self._build_transport_bar()
 
         video_wrap = QWidget()
         vw = QVBoxLayout(video_wrap)
@@ -134,6 +120,107 @@ class MainWindow(QMainWindow):
         self.root_split = root_split
         self.setCentralWidget(root_split)
         self.setStatusBar(QStatusBar())
+
+    def _build_transport_bar(self) -> QWidget:
+        """Slim VLC-style bottom transport: seek slider on top row;
+        play/stop/next + time + volume + fullscreen on the bottom row."""
+        wrap = QWidget()
+        col = QVBoxLayout(wrap)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+
+        # Top row: seek slider.
+        self.transport = QSlider(Qt.Orientation.Horizontal)
+        self.transport.setRange(0, 1000)
+        self.transport.setMaximumHeight(16)
+        self.transport.sliderMoved.connect(lambda v: self.video.set_position(v / 1000.0))
+        col.addWidget(self.transport)
+
+        # Bottom row: transport buttons | time | spacer | volume | fullscreen.
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+
+        def slim_button(icon_pix=None, text=None, slot=None) -> QPushButton:
+            b = QPushButton()
+            if icon_pix is not None:
+                b.setIcon(self.style().standardIcon(icon_pix))
+            if text is not None:
+                b.setText(text)
+            b.setFlat(True)
+            b.setFixedHeight(24)
+            if slot is not None:
+                b.clicked.connect(slot)
+            return b
+
+        self.play_pause_btn = slim_button(QStyle.StandardPixmap.SP_MediaPlay, slot=self._toggle_pause)
+        self.stop_btn = slim_button(QStyle.StandardPixmap.SP_MediaStop, slot=self._stop)
+        self.next_btn = slim_button(QStyle.StandardPixmap.SP_MediaSkipForward, slot=self._play_next_from_queue)
+        for b in (self.play_pause_btn, self.stop_btn, self.next_btn):
+            b.setFixedWidth(28)
+            row.addWidget(b)
+
+        self.time_label = QLabel("--:-- / --:--")
+        self.time_label.setStyleSheet("color: palette(mid); font-family: monospace;")
+        row.addWidget(self.time_label)
+
+        row.addStretch(1)
+
+        self.mute_btn = slim_button(QStyle.StandardPixmap.SP_MediaVolume, slot=self._toggle_mute)
+        self.mute_btn.setFixedWidth(28)
+        row.addWidget(self.mute_btn)
+
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(80)
+        self.volume_slider.setFixedWidth(100)
+        self.volume_slider.setMaximumHeight(16)
+        self.volume_slider.valueChanged.connect(self._on_volume_changed)
+        row.addWidget(self.volume_slider)
+
+        fs_btn = slim_button(text="⛶", slot=self._toggle_fullscreen)
+        fs_btn.setFixedWidth(28)
+        row.addWidget(fs_btn)
+
+        col.addLayout(row)
+        return wrap
+
+    @staticmethod
+    def _format_time(ms: int) -> str:
+        if ms is None or ms < 0:
+            return "--:--"
+        s = ms // 1000
+        h, s = divmod(s, 3600)
+        m, s = divmod(s, 60)
+        if h:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    def _on_volume_changed(self, v: int):
+        self.video.set_volume(v)
+        if v > 0 and self.video.get_mute():
+            self.video.set_mute(False)
+        self._update_mute_icon()
+
+    def _toggle_mute(self):
+        self.video.set_mute(not self.video.get_mute())
+        self._update_mute_icon()
+
+    def _update_mute_icon(self):
+        muted = self.video.get_mute() or self.video.get_volume() == 0
+        pix = (QStyle.StandardPixmap.SP_MediaVolumeMuted if muted
+               else QStyle.StandardPixmap.SP_MediaVolume)
+        self.mute_btn.setIcon(self.style().standardIcon(pix))
+
+    def _update_play_pause_icon(self):
+        pix = (QStyle.StandardPixmap.SP_MediaPause if self.video.is_playing()
+               else QStyle.StandardPixmap.SP_MediaPlay)
+        self.play_pause_btn.setIcon(self.style().standardIcon(pix))
+
+    def _stop(self):
+        self.video.stop()
+        self.current_file = None
+        self.now_playing.setText("Nothing playing")
 
     def _build_toolbar(self):
         self.toolbar = QToolBar()
@@ -304,6 +391,10 @@ class MainWindow(QMainWindow):
         pos = self.video.position()
         if not self.transport.isSliderDown():
             self.transport.setValue(int(pos * 1000))
+        cur = self.video.get_time()
+        total = self.video.get_length()
+        self.time_label.setText(f"{self._format_time(cur)} / {self._format_time(total)}")
+        self._update_play_pause_icon()
         if self.current_file and self.video.is_ended():
             self.current_file = None
             self._play_next_from_queue()
