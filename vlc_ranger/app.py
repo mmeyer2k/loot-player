@@ -5,19 +5,22 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QModelIndex, QTimer
+from PyQt6.QtCore import Qt, QByteArray, QTimer
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel,
     QStatusBar, QSlider, QMessageBox,
-    QStyle, QMenu, QToolBar,
+    QStyle, QToolBar,
 )
 
 from vlc_ranger.db import LibraryDB
 from vlc_ranger.models import FileRow, QueueModel
 from vlc_ranger.player import VlcWidget
 from vlc_ranger.scanner import Scanner
+from vlc_ranger.ui.library_editor import LibraryEditor
+from vlc_ranger.ui.library_tree import LibraryTree
+from vlc_ranger.ui.queue_panel import QueuePanel
 
 APP_NAME = "vlc-ranger"
 OLD_APP_NAME = "vlc-library"
@@ -44,6 +47,7 @@ class MainWindow(QMainWindow):
         self.db = LibraryDB(data_dir() / "library.db")
         self.scanner: Optional[Scanner] = None
         self.current_file: Optional[FileRow] = None
+        self.queue_model = QueueModel()
 
         self._build_ui()
         self._build_toolbar()
@@ -51,14 +55,11 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Space"),  self, activated=self._toggle_pause)
         QShortcut(QKeySequence("F"),      self, activated=self._toggle_fullscreen)
         QShortcut(QKeySequence("Esc"),    self, activated=lambda: self.isFullScreen() and self.showNormal())
-        QShortcut(QKeySequence("Ctrl+K"), self, activated=lambda: self.browse.search.setFocus())
-        QShortcut(QKeySequence("Ctrl+Q"), self, activated=lambda: self.queue_action.toggle())
-        QShortcut(QKeySequence("Ctrl+B"), self, activated=lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
-        QShortcut(QKeySequence("Backspace"), self, activated=self._backspace_up)
+        QShortcut(QKeySequence("Ctrl+K"), self, activated=lambda: self.tree.search.setFocus())
 
         self._restore_state()
+        self._update_queue_visibility()
 
-        # Tick for transport slider + auto-advance
         self.tick = QTimer(self)
         self.tick.setInterval(500)
         self.tick.timeout.connect(self._on_tick)
@@ -66,25 +67,18 @@ class MainWindow(QMainWindow):
 
     # UI -------------------------------------------------------------------
     def _build_ui(self):
-        from vlc_ranger.ui.sidebar import Sidebar
-        from vlc_ranger.ui.browse import BrowseRouter
+        # Column 1: search + library tree
+        self.tree = LibraryTree(self.db)
+        self.tree.play_requested.connect(self._play)
+        self.tree.queue_end_requested.connect(self._add_to_queue_end)
+        self.tree.queue_front_requested.connect(self._add_to_queue_front)
+        self.tree.play_next_requested.connect(self._play_next)
+        self.tree.new_library_requested.connect(self._new_library)
+        self.tree.edit_library_requested.connect(self._edit_library)
+        self.tree.rescan_library_requested.connect(self._rescan_library)
+        self.tree.delete_library_requested.connect(self._delete_library)
 
-        self.sidebar = Sidebar()
-        self.browse = BrowseRouter(self.db)
-
-        self.sidebar.library_selected.connect(self.browse.show_library)
-        self.sidebar.new_library_requested.connect(self._new_library)
-        self.sidebar.edit_library_requested.connect(self._edit_library)
-        self.sidebar.rescan_library_requested.connect(self._rescan_library)
-        self.sidebar.delete_library_requested.connect(self._delete_library)
-
-        self.browse.play_requested.connect(self._play)
-        self.browse.queue_end_requested.connect(self._add_to_queue_end)
-        self.browse.queue_front_requested.connect(self._add_to_queue_front)
-        self.browse.play_next_requested.connect(self._play_next)
-
-        self.queue_model = QueueModel()
-
+        # Column 2: video + transport
         self.video = VlcWidget()
         self.transport = QSlider(Qt.Orientation.Horizontal)
         self.transport.setRange(0, 1000)
@@ -110,30 +104,30 @@ class MainWindow(QMainWindow):
         vw.addWidget(self.now_playing)
         vw.addLayout(controls)
 
-        center_split = QSplitter(Qt.Orientation.Vertical)
-        center_split.addWidget(self.browse)
-        center_split.addWidget(video_wrap)
-        center_split.setSizes([600, 250])
-        self.center_split = center_split
-
-        from vlc_ranger.ui.queue_panel import QueuePanel
+        # Column 3: queue (auto-hidden when empty)
         self.queue_panel = QueuePanel(self.queue_model)
         self.queue_panel.play_next_requested.connect(self._play_next_from_queue)
         self.queue_panel.clear_requested.connect(self._clear_queue)
         self.queue_panel.remove_requested.connect(self.queue_model.remove_indices)
         self.queue_panel.remove_requested.connect(lambda *_: self._persist_queue())
-        self.queue_panel.setVisible(False)         # toggled by Ctrl+Q / toolbar button in later tasks
+        self.queue_panel.setVisible(False)
+
+        # Auto-show/hide queue column based on queue contents.
+        self.queue_model.rowsInserted.connect(lambda *_: self._update_queue_visibility())
+        self.queue_model.rowsRemoved.connect(lambda *_: self._update_queue_visibility())
+        self.queue_model.modelReset.connect(self._update_queue_visibility)
 
         root_split = QSplitter(Qt.Orientation.Horizontal)
-        root_split.addWidget(self.sidebar)
-        root_split.addWidget(center_split)
+        root_split.addWidget(self.tree)
+        root_split.addWidget(video_wrap)
         root_split.addWidget(self.queue_panel)
-        root_split.setSizes([260, 880, 260])
+        root_split.setSizes([300, 800, 300])
+        root_split.setStretchFactor(0, 0)
+        root_split.setStretchFactor(1, 1)
+        root_split.setStretchFactor(2, 0)
         self.root_split = root_split
         self.setCentralWidget(root_split)
         self.setStatusBar(QStatusBar())
-
-        self.sidebar.reload(self.db.list_libraries())
 
     def _build_toolbar(self):
         tb = QToolBar()
@@ -142,23 +136,9 @@ class MainWindow(QMainWindow):
         new_lib.triggered.connect(self._new_library)
         tb.addAction(new_lib)
 
-        rescan = QAction("⟳ Rescan current", self)
-        rescan.triggered.connect(self._rescan_current_library)
-        tb.addAction(rescan)
-
-        self.queue_action = QAction("Queue", self)
-        self.queue_action.setCheckable(True)
-        self.queue_action.toggled.connect(self.queue_panel.setVisible)
-        tb.addAction(self.queue_action)
-
         fullscreen = QAction("⛶ Fullscreen", self)
         fullscreen.triggered.connect(self._toggle_fullscreen)
         tb.addAction(fullscreen)
-
-    def _rescan_current_library(self):
-        lib_id = self.browse.current_library_id
-        if lib_id is not None:
-            self._start_scan_library(lib_id)
 
     def _toggle_fullscreen(self):
         if self.isFullScreen():
@@ -166,38 +146,22 @@ class MainWindow(QMainWindow):
         else:
             self.showFullScreen()
 
-    def _backspace_up(self):
-        """Forward Backspace to drill-down views that handle it."""
-        current = self.browse.stack.currentWidget()
-        if hasattr(current, "_go_up"):
-            current._go_up()
+    def _update_queue_visibility(self):
+        self.queue_panel.setVisible(self.queue_model.rowCount() > 0)
 
     # First-load --------------------------------------------------------
     def _restore_state(self):
         self.queue_model.append(self.db.load_queue())
 
-        from PyQt6.QtCore import QByteArray
-
-        def _restore(key, applier, decoder=None):
-            raw = self.db.ui_get(key)
-            if raw is not None:
-                try:
-                    applier(decoder(raw) if decoder else raw)
-                except Exception:
-                    pass
-
-        _restore("splitter.root", self.root_split.restoreState,
-                 lambda s: QByteArray.fromHex(s.encode()))
-        _restore("splitter.center", self.center_split.restoreState,
-                 lambda s: QByteArray.fromHex(s.encode()))
-        _restore("queue_panel_visible", lambda v: self.queue_action.setChecked(v == "1"))
-        _restore("sidebar_visible", lambda v: self.sidebar.setVisible(v == "1"))
-        _restore("selected_library_id",
-                 lambda v: self.browse.show_library(int(v)) if v else None)
+        raw = self.db.ui_get("splitter.root")
+        if raw is not None:
+            try:
+                self.root_split.restoreState(QByteArray.fromHex(raw.encode()))
+            except Exception:
+                pass
 
     # Library handlers --------------------------------------------------
     def _new_library(self):
-        from vlc_ranger.ui.library_editor import LibraryEditor
         dlg = LibraryEditor(self)
         if dlg.exec() and dlg.result_data:
             name, type_, folders = dlg.result_data
@@ -208,12 +172,11 @@ class MainWindow(QMainWindow):
                 return
             for f in folders:
                 self.db.add_library_folder(lib_id, f)
-            self.sidebar.reload(self.db.list_libraries())
+            self.tree.reload()
             if folders:
                 self._start_scan_library(lib_id)
 
     def _edit_library(self, lib_id: int):
-        from vlc_ranger.ui.library_editor import LibraryEditor
         libs = {i: (n, t) for (i, n, t) in self.db.list_libraries()}
         name, type_ = libs.get(lib_id, ("", "generic"))
         folders = [p for (_, p) in self.db.library_folders(lib_id)]
@@ -233,7 +196,7 @@ class MainWindow(QMainWindow):
                         break
             for f in added:
                 self.db.add_library_folder(lib_id, f)
-            self.sidebar.reload(self.db.list_libraries())
+            self.tree.reload()
             if added or new_type != type_:
                 self._start_scan_library(lib_id)
 
@@ -246,7 +209,7 @@ class MainWindow(QMainWindow):
             "This removes the library and all its indexed files (and their queue/watch state). Continue?",
         ) == QMessageBox.StandardButton.Yes:
             self.db.delete_library(lib_id)
-            self.sidebar.reload(self.db.list_libraries())
+            self.tree.reload()
 
     def _start_scan_library(self, lib_id: int):
         if self.scanner and self.scanner.isRunning():
@@ -262,7 +225,7 @@ class MainWindow(QMainWindow):
         )
         self.scanner.finished_scan.connect(
             lambda total: (self.statusBar().showMessage(f"Indexed {total} file(s)"),
-                           self.browse.show_library(lib_id))
+                           self.tree.reload())
         )
         self.scanner.start()
 
@@ -276,8 +239,7 @@ class MainWindow(QMainWindow):
         self._persist_queue()
 
     def _play_next(self, files: list[FileRow]):
-        # insert right after the currently-playing index (top of queue is 0)
-        self.queue_model.insert_after_current(files, -1)  # -1 => insert at position 0
+        self.queue_model.prepend(files)
         self._persist_queue()
 
     def _persist_queue(self):
@@ -295,7 +257,6 @@ class MainWindow(QMainWindow):
 
     # Playback ---------------------------------------------------------
     def _play(self, f: FileRow):
-        # ensure VLC is bound to the now-shown video widget
         self.video.attach()
         self.video.play_path(f.path)
         self.current_file = f
@@ -305,11 +266,9 @@ class MainWindow(QMainWindow):
         self.video.toggle_pause()
 
     def _on_tick(self):
-        # update transport slider
         pos = self.video.position()
         if not self.transport.isSliderDown():
             self.transport.setValue(int(pos * 1000))
-        # auto-advance when current ends
         if self.current_file and self.video.is_ended():
             self.current_file = None
             self._play_next_from_queue()
@@ -321,11 +280,6 @@ class MainWindow(QMainWindow):
             self.scanner.cancel()
             self.scanner.wait(2000)
         self.db.ui_set("splitter.root", self.root_split.saveState().toHex().data().decode())
-        self.db.ui_set("splitter.center", self.center_split.saveState().toHex().data().decode())
-        self.db.ui_set("queue_panel_visible", "1" if self.queue_panel.isVisible() else "0")
-        self.db.ui_set("sidebar_visible", "1" if self.sidebar.isVisible() else "0")
-        if self.browse.current_library_id is not None:
-            self.db.ui_set("selected_library_id", str(self.browse.current_library_id))
         super().closeEvent(ev)
 
 
@@ -334,6 +288,5 @@ def main():
     app.setApplicationName(APP_NAME)
     w = MainWindow()
     w.show()
-    # winId() is valid now — bind libVLC's output to the video widget.
     w.video.attach()
     sys.exit(app.exec())
