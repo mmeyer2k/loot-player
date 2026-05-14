@@ -75,6 +75,18 @@ class LibraryTree(QWidget):
         # ... build folder/file structure first, then collapse single chains.
         self._build_library_tree(lib_id, lib_item)
         self._collapse_chains(lib_item)
+        # If the library has exactly one library_folder, that folder is
+        # redundant noise — hoist its children directly under the library.
+        if lib_item.rowCount() == 1:
+            only = lib_item.child(0)
+            only_data = only.data(Qt.ItemDataRole.UserRole)
+            if only_data and only_data[0] == "dir":
+                grandchildren = []
+                while only.rowCount() > 0:
+                    grandchildren.append(only.takeRow(0))
+                lib_item.removeRow(0)
+                for row in grandchildren:
+                    lib_item.appendRow(row)
 
     def _build_library_tree(self, lib_id: int, lib_item: QStandardItem):
 
