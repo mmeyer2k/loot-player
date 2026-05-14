@@ -289,6 +289,8 @@ class MainWindow(QMainWindow):
             self.shuffle_btn.setIcon(qta.icon("mdi6.shuffle"))
         else:
             self.shuffle_btn.setIcon(qta.icon("mdi6.shuffle", color=color))
+        if not self.shuffle_btn.isEnabled():
+            tip = f"{tip} — disabled while playing from queue"
         self.shuffle_btn.setToolTip(tip)
         self.shuffle_btn.setChecked(self._shuffle_mode != "off")
 
@@ -335,7 +337,14 @@ class MainWindow(QMainWindow):
             self._toggle_cinema_mode()
 
     def _update_queue_visibility(self):
-        self.queue_panel.setVisible(self.queue_model.rowCount() > 0)
+        has_items = self.queue_model.rowCount() > 0
+        self.queue_panel.setVisible(has_items)
+        # Shuffle is meaningless while the queue is driving playback —
+        # disable the button so the state is obvious, and re-apply the
+        # tooltip so the disabled reason is visible.
+        if hasattr(self, "shuffle_btn"):
+            self.shuffle_btn.setEnabled(not has_items)
+            self._apply_shuffle_visual()
 
     # First-load --------------------------------------------------------
     def _restore_state(self):
@@ -450,22 +459,17 @@ class MainWindow(QMainWindow):
         self._play(f)
 
     def _take_next_for_mode(self):
-        """Return the next FileRow to play based on self._shuffle_mode, or None."""
-        if self._shuffle_mode == "off":
-            f = self.queue_model.take_next()
-            self._persist_queue()
-            if f:
-                return f
-            cur = self.current_file
-            if cur is None or cur.library_id is None:
-                return None
-            return self.db.next_file_in_folder(cur.library_id, cur.parent_dir, cur.filename)
+        """Return the next FileRow to play based on self._shuffle_mode, or None.
 
-        # Shuffle on: random pop from queue first.
-        f = self.queue_model.take_random()
+        Queue items always play in FIFO order — shuffle only affects the
+        no-queue fallback. The shuffle button is disabled in the UI while
+        the queue is non-empty, mirroring this contract."""
+        # Queue is always FIFO regardless of shuffle mode.
+        f = self.queue_model.take_next()
         self._persist_queue()
         if f:
             return f
+
         cur = self.current_file
         if cur is None:
             return None
@@ -475,7 +479,10 @@ class MainWindow(QMainWindow):
             return self.db.random_file_in_library(cur.library_id, exclude_id=cur.id)
         if self._shuffle_mode == "between":
             return self.db.random_file_anywhere(exclude_id=cur.id)
-        return None
+        # mode == "off": alphabetical next in same folder
+        if cur.library_id is None:
+            return None
+        return self.db.next_file_in_folder(cur.library_id, cur.parent_dir, cur.filename)
 
     def _play_prev(self):
         """Transport ⏮: restart current if > 3s in, else previous folder neighbor."""
