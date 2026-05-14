@@ -120,7 +120,6 @@ class MainWindow(QMainWindow):
         # Column 1: search + library tree
         self.tree = LibraryTree(self.db)
         self.tree.play_requested.connect(self._play)
-        self.tree.queue_end_requested.connect(self._add_to_queue_end)
         self.tree.queue_front_requested.connect(self._add_to_queue_front)
         self.tree.play_next_requested.connect(self._queue_play_next)
         self.tree.new_library_requested.connect(self._new_library)
@@ -217,6 +216,19 @@ class MainWindow(QMainWindow):
                   self.next_btn, self.shuffle_btn):
             row.addWidget(b)
 
+        # Buffering spinner — visible only while libVLC is loading/buffering.
+        self.buffering_indicator = qta.IconWidget()
+        self.buffering_indicator.setIconSize(self._ICON_SIZE)
+        self.buffering_indicator.setFixedSize(self._BUTTON_SIZE)
+        self._buffering_spin = qta.Spin(self.buffering_indicator)
+        self.buffering_indicator.setIcon(
+            qta.icon("mdi6.loading", color="palette(mid)",
+                     animation=self._buffering_spin)
+        )
+        self.buffering_indicator.setToolTip("Buffering…")
+        self.buffering_indicator.setVisible(False)
+        row.addWidget(self.buffering_indicator)
+
         self.time_label = QLabel("--:-- / --:--")
         self.time_label.setStyleSheet("color: palette(mid); font-family: monospace;")
         row.addWidget(self.time_label)
@@ -281,7 +293,6 @@ class MainWindow(QMainWindow):
         self.video.stop()
         self.current_file = None
         self.setWindowTitle(APP_NAME)
-        self.video.setToolTip("")
         self.tree.set_playing(None)
 
     def _cycle_shuffle(self):
@@ -443,17 +454,16 @@ class MainWindow(QMainWindow):
         self.scanner.start()
 
     # Queue ops --------------------------------------------------------
-    def _add_to_queue_end(self, files: list[FileRow]):
-        self.queue_model.append(files)
-        self._persist_queue()
-
     def _add_to_queue_front(self, files: list[FileRow]):
         self.queue_model.prepend(files)
         self._persist_queue()
 
     def _queue_play_next(self, files: list[FileRow]):
+        """Prepend the given files to the queue; start playback if idle."""
         self.queue_model.prepend(files)
         self._persist_queue()
+        if self.current_file is None:
+            self._play_next()
 
     def _persist_queue(self):
         self.db.save_queue([f.id for f in self.queue_model.files()])
@@ -515,7 +525,6 @@ class MainWindow(QMainWindow):
         self.video.play_path(f.path)
         self.current_file = f
         self.setWindowTitle(f"{APP_NAME} — {f.filename}")
-        self.video.setToolTip(f"{f.filename}\n{f.parent_dir}")
         self.tree.set_playing(f.id)
 
     def _toggle_pause(self):
@@ -529,6 +538,7 @@ class MainWindow(QMainWindow):
         total = self.video.get_length()
         self.time_label.setText(f"{self._format_time(cur)} / {self._format_time(total)}")
         self._update_play_pause_icon()
+        self.buffering_indicator.setVisible(self.video.is_buffering())
         if self.current_file and self.video.is_ended():
             self.current_file = None
             self._play_next()

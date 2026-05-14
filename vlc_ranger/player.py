@@ -53,6 +53,10 @@ class VlcWidget(QFrame):
     def is_playing(self) -> bool:
         return self.player.get_state() == vlc.State.Playing
 
+    def is_buffering(self) -> bool:
+        """True while libVLC is opening or buffering the current media."""
+        return self.player.get_state() in (vlc.State.Opening, vlc.State.Buffering)
+
     def set_volume(self, v: int) -> None:
         self.player.audio_set_volume(int(v))
 

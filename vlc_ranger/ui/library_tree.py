@@ -16,8 +16,7 @@ from vlc_ranger.models import FileRow
 
 class LibraryTree(QWidget):
     play_requested = pyqtSignal(object)        # FileRow
-    queue_end_requested = pyqtSignal(list)     # list[FileRow]
-    queue_front_requested = pyqtSignal(list)
+    queue_front_requested = pyqtSignal(list)   # used internally for "Play all"
     play_next_requested = pyqtSignal(list)
     new_library_requested = pyqtSignal()
     edit_library_requested = pyqtSignal(int)
@@ -260,8 +259,6 @@ class LibraryTree(QWidget):
                 return
             files = [file_row]
             m.addAction("▶ Play now",     lambda: self.play_requested.emit(file_row))
-            m.addAction("Queue (end)",    lambda: self.queue_end_requested.emit(files))
-            m.addAction("Queue (front)",  lambda: self.queue_front_requested.emit(files))
             m.addAction("Play next",      lambda: self.play_next_requested.emit(files))
         elif kind == "dir":
             files = self._files_under_item(item)
@@ -270,10 +267,8 @@ class LibraryTree(QWidget):
             m.addAction(f"▶ Play all ({len(files)})",
                         lambda: (self.queue_front_requested.emit(files[1:]),
                                  self.play_requested.emit(files[0])))
-            m.addAction("Queue all (end)",
-                        lambda: self.queue_end_requested.emit(files))
-            m.addAction("Queue all (front)",
-                        lambda: self.queue_front_requested.emit(files))
+            m.addAction(f"Play next ({len(files)})",
+                        lambda: self.play_next_requested.emit(files))
         elif kind == "library":
             lib_id = data[1]
             m.addAction("Edit…",   lambda: self.edit_library_requested.emit(lib_id))
