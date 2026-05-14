@@ -220,15 +220,26 @@ class MainWindow(QMainWindow):
                   self.next_btn, self.shuffle_btn):
             row.addWidget(b)
 
-        # Buffering spinner — visible while libVLC is loading/buffering.
-        self.buffering_indicator = qta.IconWidget()
-        self.buffering_indicator.setIconSize(self._ICON_SIZE)
-        self.buffering_indicator.setFixedSize(self._BUTTON_SIZE)
-        self._buffering_spin = qta.Spin(self.buffering_indicator, interval=80)
-        self.buffering_indicator.setIcon(
-            qta.icon("mdi6.loading", color="#999999",
+        # Buffering indicator — animated spinner + accented label so it's
+        # impossible to miss.
+        self.buffering_indicator = QWidget()
+        bi_lay = QHBoxLayout(self.buffering_indicator)
+        bi_lay.setContentsMargins(6, 0, 6, 0)
+        bi_lay.setSpacing(6)
+        self._buffering_icon = qta.IconWidget()
+        self._buffering_icon.setIconSize(QSize(22, 22))
+        self._buffering_icon.setFixedSize(QSize(24, 24))
+        self._buffering_spin = qta.Spin(self._buffering_icon, interval=25, step=12)
+        self._buffering_icon.setIcon(
+            qta.icon("mdi6.loading", color="#00BFFF",
                      animation=self._buffering_spin)
         )
+        bi_lay.addWidget(self._buffering_icon)
+        self._buffering_label = QLabel("Loading…")
+        self._buffering_label.setStyleSheet(
+            "color: #00BFFF; font-weight: 600; letter-spacing: 0.5px;"
+        )
+        bi_lay.addWidget(self._buffering_label)
         self.buffering_indicator.setToolTip("Buffering…")
         self.buffering_indicator.setVisible(False)
         row.addWidget(self.buffering_indicator)
