@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self.queue_model = QueueModel()
         self._cinema = False
         self._fullscreen = False
+        self._shuffle_mode: str = "off"
 
         self._build_ui()
 
@@ -410,18 +411,39 @@ class MainWindow(QMainWindow):
         self._persist_queue()
 
     def _play_next(self):
-        """Transport ⏭: queue first, else next folder neighbor."""
-        f = self.queue_model.take_next()
+        """Transport ⏭: respect shuffle mode (off / within / between)."""
+        f = self._take_next_for_mode()
+        if f is None:
+            return
+        self._play(f)
+
+    def _take_next_for_mode(self):
+        """Return the next FileRow to play based on self._shuffle_mode, or None."""
+        if self._shuffle_mode == "off":
+            f = self.queue_model.take_next()
+            self._persist_queue()
+            if f:
+                return f
+            cur = self.current_file
+            if cur is None or cur.library_id is None:
+                return None
+            return self.db.next_file_in_folder(cur.library_id, cur.parent_dir, cur.filename)
+
+        # Shuffle on: random pop from queue first.
+        f = self.queue_model.take_random()
         self._persist_queue()
         if f:
-            self._play(f)
-            return
+            return f
         cur = self.current_file
-        if cur is None or cur.library_id is None:
-            return
-        nxt = self.db.next_file_in_folder(cur.library_id, cur.parent_dir, cur.filename)
-        if nxt:
-            self._play(nxt)
+        if cur is None:
+            return None
+        if self._shuffle_mode == "within":
+            if cur.library_id is None:
+                return None
+            return self.db.random_file_in_library(cur.library_id, exclude_id=cur.id)
+        if self._shuffle_mode == "between":
+            return self.db.random_file_anywhere(exclude_id=cur.id)
+        return None
 
     def _play_prev(self):
         """Transport ⏮: restart current if > 3s in, else previous folder neighbor."""
