@@ -54,7 +54,7 @@ class MainWindow(QMainWindow):
 
         QShortcut(QKeySequence("Space"),  self, activated=self._toggle_pause)
         QShortcut(QKeySequence("F"),      self, activated=self._toggle_fullscreen)
-        QShortcut(QKeySequence("Esc"),    self, activated=lambda: self.isFullScreen() and self.showNormal())
+        QShortcut(QKeySequence("Esc"),    self, activated=lambda: self.isFullScreen() and self._exit_fullscreen())
         QShortcut(QKeySequence("Ctrl+K"), self, activated=lambda: self.tree.search.setFocus())
 
         self._restore_state()
@@ -89,7 +89,9 @@ class MainWindow(QMainWindow):
         self.now_playing.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.now_playing.setMinimumWidth(0)
 
-        controls = QHBoxLayout()
+        self.controls_wrap = QWidget()
+        controls = QHBoxLayout(self.controls_wrap)
+        controls.setContentsMargins(0, 0, 0, 0)
         for icon, slot in [
             (QStyle.StandardPixmap.SP_MediaPlay,         self._toggle_pause),
             (QStyle.StandardPixmap.SP_MediaStop,         self.video.stop),
@@ -106,7 +108,7 @@ class MainWindow(QMainWindow):
         vw.setContentsMargins(0, 0, 0, 0)
         vw.addWidget(self.video, 1)
         vw.addWidget(self.now_playing)
-        vw.addLayout(controls)
+        vw.addWidget(self.controls_wrap)
 
         # Column 3: queue (auto-hidden when empty)
         self.queue_panel = QueuePanel(self.queue_model)
@@ -134,21 +136,50 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
 
     def _build_toolbar(self):
-        tb = QToolBar()
-        self.addToolBar(tb)
+        self.toolbar = QToolBar()
+        self.addToolBar(self.toolbar)
         new_lib = QAction("+ New Library", self)
         new_lib.triggered.connect(self._new_library)
-        tb.addAction(new_lib)
+        self.toolbar.addAction(new_lib)
 
         fullscreen = QAction("⛶ Fullscreen", self)
         fullscreen.triggered.connect(self._toggle_fullscreen)
-        tb.addAction(fullscreen)
+        self.toolbar.addAction(fullscreen)
 
     def _toggle_fullscreen(self):
         if self.isFullScreen():
-            self.showNormal()
+            self._exit_fullscreen()
         else:
-            self.showFullScreen()
+            self._enter_fullscreen()
+
+    def _enter_fullscreen(self):
+        # Remember which chrome was visible so we can restore it on exit.
+        self._fs_state = {
+            "tree": self.tree.isVisible(),
+            "queue_panel": self.queue_panel.isVisible(),
+            "toolbar": self.toolbar.isVisible(),
+            "statusbar": self.statusBar().isVisible(),
+            "now_playing": self.now_playing.isVisible(),
+            "controls": self.controls_wrap.isVisible(),
+        }
+        self.tree.setVisible(False)
+        self.queue_panel.setVisible(False)
+        self.toolbar.setVisible(False)
+        self.statusBar().setVisible(False)
+        self.now_playing.setVisible(False)
+        self.controls_wrap.setVisible(False)
+        self.showFullScreen()
+
+    def _exit_fullscreen(self):
+        self.showNormal()
+        state = getattr(self, "_fs_state", {})
+        self.tree.setVisible(state.get("tree", True))
+        self.toolbar.setVisible(state.get("toolbar", True))
+        self.statusBar().setVisible(state.get("statusbar", True))
+        self.now_playing.setVisible(state.get("now_playing", True))
+        self.controls_wrap.setVisible(state.get("controls", True))
+        # Queue: re-apply the auto rule instead of blindly restoring.
+        self._update_queue_visibility()
 
     def _update_queue_visibility(self):
         self.queue_panel.setVisible(self.queue_model.rowCount() > 0)
