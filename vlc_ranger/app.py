@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         self.tree.play_requested.connect(self._play)
         self.tree.queue_end_requested.connect(self._add_to_queue_end)
         self.tree.queue_front_requested.connect(self._add_to_queue_front)
-        self.tree.play_next_requested.connect(self._play_next)
+        self.tree.play_next_requested.connect(self._queue_play_next)
         self.tree.new_library_requested.connect(self._new_library)
         self.tree.edit_library_requested.connect(self._edit_library)
         self.tree.rescan_library_requested.connect(self._rescan_library)
@@ -360,7 +360,7 @@ class MainWindow(QMainWindow):
         self.queue_model.prepend(files)
         self._persist_queue()
 
-    def _play_next(self, files: list[FileRow]):
+    def _queue_play_next(self, files: list[FileRow]):
         self.queue_model.prepend(files)
         self._persist_queue()
 
