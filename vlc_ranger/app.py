@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QByteArray, QTimer
+from PyQt6.QtCore import Qt, QByteArray, QSize, QTimer
 from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import (
     QStatusBar, QSlider, QMessageBox,
     QStyle,
 )
+
+import qtawesome as qta
 
 from vlc_ranger.db import LibraryDB
 from vlc_ranger.models import FileRow, QueueModel
@@ -78,10 +80,11 @@ def data_dir() -> Path:
 
 class MainWindow(QMainWindow):
     _SHUFFLE_CYCLE = ["off", "within", "between"]
-    _SHUFFLE_STYLES = {
-        "off":     ("",                                          "Shuffle: off"),
-        "within":  ("background-color: rgba(255, 200, 0, 0.25);", "Shuffle: within library"),
-        "between": ("background-color: rgba(0, 150, 255, 0.30);", "Shuffle: across all libraries"),
+    _SHUFFLE_VISUALS = {
+        # mode -> (icon color or None for default, tooltip)
+        "off":     (None,      "Shuffle: off"),
+        "within":  ("#FFC800", "Shuffle: within library"),
+        "between": ("#0096FF", "Shuffle: across all libraries"),
     }
 
     def __init__(self):
@@ -168,9 +171,25 @@ class MainWindow(QMainWindow):
         sb.messageChanged.connect(self._update_status_visibility)
         self._update_status_visibility(sb.currentMessage())
 
+    _BUTTON_SIZE = QSize(30, 26)
+    _ICON_SIZE = QSize(18, 18)
+
+    def _icon_button(self, mdi_name: str, slot=None, *, checkable: bool = False) -> QPushButton:
+        """Make a uniform flat icon button using a Material Design Icon."""
+        b = QPushButton()
+        b.setIcon(qta.icon(mdi_name))
+        b.setIconSize(self._ICON_SIZE)
+        b.setFixedSize(self._BUTTON_SIZE)
+        b.setFlat(True)
+        if checkable:
+            b.setCheckable(True)
+        if slot is not None:
+            b.clicked.connect(slot)
+        return b
+
     def _build_transport_bar(self) -> QWidget:
         """Slim VLC-style bottom transport: seek slider on top row;
-        play/stop/next + time + volume + fullscreen on the bottom row."""
+        prev/play/stop/next/shuffle | time | volume | fullscreen on the bottom row."""
         wrap = QWidget()
         col = QVBoxLayout(wrap)
         col.setContentsMargins(0, 0, 0, 0)
@@ -183,35 +202,20 @@ class MainWindow(QMainWindow):
         self.transport.sliderMoved.connect(lambda v: self.video.set_position(v / 1000.0))
         col.addWidget(self.transport)
 
-        # Bottom row: transport buttons | time | spacer | volume | fullscreen.
+        # Bottom row.
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(4)
 
-        def slim_button(icon_pix=None, text=None, slot=None) -> QPushButton:
-            b = QPushButton()
-            if icon_pix is not None:
-                b.setIcon(self.style().standardIcon(icon_pix))
-            if text is not None:
-                b.setText(text)
-            b.setFlat(True)
-            b.setFixedHeight(24)
-            if slot is not None:
-                b.clicked.connect(slot)
-            return b
-
-        self.prev_btn = slim_button(QStyle.StandardPixmap.SP_MediaSkipBackward, slot=self._play_prev)
-        self.play_pause_btn = slim_button(QStyle.StandardPixmap.SP_MediaPlay, slot=self._toggle_pause)
-        self.stop_btn = slim_button(QStyle.StandardPixmap.SP_MediaStop, slot=self._stop)
-        self.next_btn = slim_button(QStyle.StandardPixmap.SP_MediaSkipForward, slot=self._play_next)
-        for b in (self.prev_btn, self.play_pause_btn, self.stop_btn, self.next_btn):
-            b.setFixedWidth(28)
+        self.prev_btn = self._icon_button("mdi6.skip-previous", slot=self._play_prev)
+        self.play_pause_btn = self._icon_button("mdi6.play", slot=self._toggle_pause)
+        self.stop_btn = self._icon_button("mdi6.stop", slot=self._stop)
+        self.next_btn = self._icon_button("mdi6.skip-next", slot=self._play_next)
+        self.shuffle_btn = self._icon_button("mdi6.shuffle", slot=self._cycle_shuffle,
+                                             checkable=True)
+        for b in (self.prev_btn, self.play_pause_btn, self.stop_btn,
+                  self.next_btn, self.shuffle_btn):
             row.addWidget(b)
-
-        self.shuffle_btn = slim_button(text="🔀", slot=self._cycle_shuffle)
-        self.shuffle_btn.setCheckable(True)
-        self.shuffle_btn.setFixedWidth(28)
-        row.addWidget(self.shuffle_btn)
 
         self.time_label = QLabel("--:-- / --:--")
         self.time_label.setStyleSheet("color: palette(mid); font-family: monospace;")
@@ -219,8 +223,7 @@ class MainWindow(QMainWindow):
 
         row.addStretch(1)
 
-        self.mute_btn = slim_button(QStyle.StandardPixmap.SP_MediaVolume, slot=self._toggle_mute)
-        self.mute_btn.setFixedWidth(28)
+        self.mute_btn = self._icon_button("mdi6.volume-high", slot=self._toggle_mute)
         row.addWidget(self.mute_btn)
 
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
@@ -231,9 +234,8 @@ class MainWindow(QMainWindow):
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         row.addWidget(self.volume_slider)
 
-        fs_btn = slim_button(text="⛶", slot=self._toggle_fullscreen)
-        fs_btn.setFixedWidth(28)
-        row.addWidget(fs_btn)
+        self.fs_btn = self._icon_button("mdi6.fullscreen", slot=self._toggle_fullscreen)
+        row.addWidget(self.fs_btn)
 
         col.addLayout(row)
         return wrap
@@ -261,14 +263,12 @@ class MainWindow(QMainWindow):
 
     def _update_mute_icon(self):
         muted = self.video.get_mute() or self.video.get_volume() == 0
-        pix = (QStyle.StandardPixmap.SP_MediaVolumeMuted if muted
-               else QStyle.StandardPixmap.SP_MediaVolume)
-        self.mute_btn.setIcon(self.style().standardIcon(pix))
+        name = "mdi6.volume-mute" if muted else "mdi6.volume-high"
+        self.mute_btn.setIcon(qta.icon(name))
 
     def _update_play_pause_icon(self):
-        pix = (QStyle.StandardPixmap.SP_MediaPause if self.video.is_playing()
-               else QStyle.StandardPixmap.SP_MediaPlay)
-        self.play_pause_btn.setIcon(self.style().standardIcon(pix))
+        name = "mdi6.pause" if self.video.is_playing() else "mdi6.play"
+        self.play_pause_btn.setIcon(qta.icon(name))
 
     def _stop(self):
         self.video.stop()
@@ -284,8 +284,11 @@ class MainWindow(QMainWindow):
         self.db.ui_set("shuffle_mode", self._shuffle_mode)
 
     def _apply_shuffle_visual(self):
-        style, tip = self._SHUFFLE_STYLES[self._shuffle_mode]
-        self.shuffle_btn.setStyleSheet(style)
+        color, tip = self._SHUFFLE_VISUALS[self._shuffle_mode]
+        if color is None:
+            self.shuffle_btn.setIcon(qta.icon("mdi6.shuffle"))
+        else:
+            self.shuffle_btn.setIcon(qta.icon("mdi6.shuffle", color=color))
         self.shuffle_btn.setToolTip(tip)
         self.shuffle_btn.setChecked(self._shuffle_mode != "off")
 
