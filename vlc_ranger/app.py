@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QByteArray, QTimer
-from PyQt6.QtGui import QAction, QShortcut, QKeySequence
+from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QSizePolicy,
     QStatusBar, QSlider, QMessageBox,
-    QStyle, QToolBar,
+    QStyle,
 )
 
 from vlc_ranger.db import LibraryDB
@@ -50,12 +50,12 @@ class MainWindow(QMainWindow):
         self.queue_model = QueueModel()
 
         self._build_ui()
-        self._build_toolbar()
 
-        QShortcut(QKeySequence("Space"),  self, activated=self._toggle_pause)
-        QShortcut(QKeySequence("F"),      self, activated=self._toggle_fullscreen)
-        QShortcut(QKeySequence("Esc"),    self, activated=lambda: self.isFullScreen() and self._exit_fullscreen())
-        QShortcut(QKeySequence("Ctrl+K"), self, activated=lambda: self.tree.search.setFocus())
+        QShortcut(QKeySequence("Space"),    self, activated=self._toggle_pause)
+        QShortcut(QKeySequence("F"),        self, activated=self._toggle_fullscreen)
+        QShortcut(QKeySequence("Esc"),      self, activated=self._on_escape)
+        QShortcut(QKeySequence("Ctrl+K"),   self, activated=lambda: self.tree.search.setFocus())
+        QShortcut(QKeySequence("Ctrl+M"),   self, activated=self._toggle_cinema_mode)
 
         self._restore_state()
         self._update_queue_visibility()
@@ -222,51 +222,41 @@ class MainWindow(QMainWindow):
         self.current_file = None
         self.now_playing.setText("Nothing playing")
 
-    def _build_toolbar(self):
-        self.toolbar = QToolBar()
-        self.addToolBar(self.toolbar)
-        new_lib = QAction("+ New Library", self)
-        new_lib.triggered.connect(self._new_library)
-        self.toolbar.addAction(new_lib)
-
-        fullscreen = QAction("⛶ Fullscreen", self)
-        fullscreen.triggered.connect(self._toggle_fullscreen)
-        self.toolbar.addAction(fullscreen)
-
-    def _toggle_fullscreen(self):
-        if self.isFullScreen():
-            self._exit_fullscreen()
-        else:
-            self._enter_fullscreen()
-
-    def _enter_fullscreen(self):
-        # Remember which chrome was visible so we can restore it on exit.
-        self._fs_state = {
-            "tree": self.tree.isVisible(),
-            "queue_panel": self.queue_panel.isVisible(),
-            "toolbar": self.toolbar.isVisible(),
-            "statusbar": self.statusBar().isVisible(),
-            "now_playing": self.now_playing.isVisible(),
-            "controls": self.controls_wrap.isVisible(),
-        }
+    def _hide_chrome(self):
         self.tree.setVisible(False)
         self.queue_panel.setVisible(False)
-        self.toolbar.setVisible(False)
         self.statusBar().setVisible(False)
         self.now_playing.setVisible(False)
         self.controls_wrap.setVisible(False)
-        self.showFullScreen()
+        self._chrome_hidden = True
 
-    def _exit_fullscreen(self):
-        self.showNormal()
-        state = getattr(self, "_fs_state", {})
-        self.tree.setVisible(state.get("tree", True))
-        self.toolbar.setVisible(state.get("toolbar", True))
-        self.statusBar().setVisible(state.get("statusbar", True))
-        self.now_playing.setVisible(state.get("now_playing", True))
-        self.controls_wrap.setVisible(state.get("controls", True))
-        # Queue: re-apply the auto rule instead of blindly restoring.
-        self._update_queue_visibility()
+    def _show_chrome(self):
+        self.tree.setVisible(True)
+        self.statusBar().setVisible(True)
+        self.now_playing.setVisible(True)
+        self.controls_wrap.setVisible(True)
+        self._update_queue_visibility()       # auto rule for queue panel
+        self._chrome_hidden = False
+
+    def _toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+            self._show_chrome()
+        else:
+            self._hide_chrome()
+            self.showFullScreen()
+
+    def _toggle_cinema_mode(self):
+        if getattr(self, "_chrome_hidden", False):
+            self._show_chrome()
+        else:
+            self._hide_chrome()
+
+    def _on_escape(self):
+        if self.isFullScreen():
+            self._toggle_fullscreen()
+        elif getattr(self, "_chrome_hidden", False):
+            self._show_chrome()
 
     def _update_queue_visibility(self):
         self.queue_panel.setVisible(self.queue_model.rowCount() > 0)
