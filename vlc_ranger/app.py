@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QByteArray, QTimer
 from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QSizePolicy,
+    QPushButton, QLabel,
     QStatusBar, QSlider, QMessageBox,
     QStyle,
 )
@@ -48,6 +48,8 @@ class MainWindow(QMainWindow):
         self.scanner: Optional[Scanner] = None
         self.current_file: Optional[FileRow] = None
         self.queue_model = QueueModel()
+        self._cinema = False
+        self._fullscreen = False
 
         self._build_ui()
 
@@ -82,10 +84,6 @@ class MainWindow(QMainWindow):
         self.video = VlcWidget()
         self.video.double_clicked.connect(self._toggle_fullscreen)
         self.video.set_volume(80)
-        self.now_playing = QLabel("Nothing playing")
-        # Allow the column to shrink below the label's natural text width.
-        self.now_playing.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.now_playing.setMinimumWidth(0)
 
         self.controls_wrap = self._build_transport_bar()
 
@@ -93,7 +91,6 @@ class MainWindow(QMainWindow):
         vw = QVBoxLayout(video_wrap)
         vw.setContentsMargins(0, 0, 0, 0)
         vw.addWidget(self.video, 1)
-        vw.addWidget(self.now_playing)
         vw.addWidget(self.controls_wrap)
 
         # Column 3: queue (auto-hidden when empty)
@@ -226,48 +223,50 @@ class MainWindow(QMainWindow):
     def _stop(self):
         self.video.stop()
         self.current_file = None
-        self.now_playing.setText("Nothing playing")
+        self.setWindowTitle(APP_NAME)
+        self.video.setToolTip("")
 
-    def _hide_chrome(self):
-        self.tree.setVisible(False)
-        self.queue_panel.setVisible(False)
-        self.statusBar().setVisible(False)
-        self.now_playing.setVisible(False)
-        self.controls_wrap.setVisible(False)
-        self._chrome_hidden = True
+    def _apply_chrome_visibility(self):
+        """Apply current cinema/fullscreen state to all chrome widgets.
 
-    def _show_chrome(self):
-        self.tree.setVisible(True)
-        self.now_playing.setVisible(True)
-        self.controls_wrap.setVisible(True)
-        self._update_queue_visibility()       # auto rule for queue panel
-        self._update_status_visibility(self.statusBar().currentMessage())
-        self._chrome_hidden = False
+        Cinema mode hides the left and right side panels only, so the video
+        gets the full window width with the transport bar still visible.
+        Fullscreen additionally hides the transport bar and status bar."""
+        hide_sides = self._cinema or self._fullscreen
+        hide_bottom = self._fullscreen
+        self.tree.setVisible(not hide_sides)
+        self.controls_wrap.setVisible(not hide_bottom)
+        if hide_sides:
+            self.queue_panel.setVisible(False)
+        else:
+            self._update_queue_visibility()
+        if hide_bottom:
+            self.statusBar().setVisible(False)
+        else:
+            self._update_status_visibility(self.statusBar().currentMessage())
 
     def _update_status_visibility(self, message: str):
-        if getattr(self, "_chrome_hidden", False):
+        if self._fullscreen:
             return
         self.statusBar().setVisible(bool(message))
 
     def _toggle_fullscreen(self):
-        if self.isFullScreen():
-            self.showNormal()
-            self._show_chrome()
-        else:
-            self._hide_chrome()
+        self._fullscreen = not self._fullscreen
+        self._apply_chrome_visibility()
+        if self._fullscreen:
             self.showFullScreen()
+        else:
+            self.showNormal()
 
     def _toggle_cinema_mode(self):
-        if getattr(self, "_chrome_hidden", False):
-            self._show_chrome()
-        else:
-            self._hide_chrome()
+        self._cinema = not self._cinema
+        self._apply_chrome_visibility()
 
     def _on_escape(self):
-        if self.isFullScreen():
+        if self._fullscreen:
             self._toggle_fullscreen()
-        elif getattr(self, "_chrome_hidden", False):
-            self._show_chrome()
+        elif self._cinema:
+            self._toggle_cinema_mode()
 
     def _update_queue_visibility(self):
         self.queue_panel.setVisible(self.queue_model.rowCount() > 0)
@@ -405,7 +404,8 @@ class MainWindow(QMainWindow):
         self.video.attach()
         self.video.play_path(f.path)
         self.current_file = f
-        self.now_playing.setText(f"▶ {f.filename}  —  {f.parent_dir}")
+        self.setWindowTitle(f"{APP_NAME} — {f.filename}")
+        self.video.setToolTip(f"{f.filename}\n{f.parent_dir}")
 
     def _toggle_pause(self):
         self.video.toggle_pause()
