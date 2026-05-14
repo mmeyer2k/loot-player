@@ -234,7 +234,14 @@ class MainWindow(QMainWindow):
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         row.addWidget(self.volume_slider)
 
+        self.cinema_btn = self._icon_button("mdi6.fit-to-screen-outline",
+                                            slot=self._toggle_cinema_mode,
+                                            checkable=True)
+        self.cinema_btn.setToolTip("Cinema mode (Ctrl+M)")
+        row.addWidget(self.cinema_btn)
+
         self.fs_btn = self._icon_button("mdi6.fullscreen", slot=self._toggle_fullscreen)
+        self.fs_btn.setToolTip("Fullscreen (F)")
         row.addWidget(self.fs_btn)
 
         col.addLayout(row)
@@ -329,6 +336,10 @@ class MainWindow(QMainWindow):
     def _toggle_cinema_mode(self):
         self._cinema = not self._cinema
         self._apply_chrome_visibility()
+        # Keep the toolbar button's checked state in sync regardless of
+        # whether this was triggered by the button itself or by Ctrl+M.
+        if hasattr(self, "cinema_btn"):
+            self.cinema_btn.setChecked(self._cinema)
 
     def _on_escape(self):
         if self._fullscreen:
