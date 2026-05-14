@@ -72,6 +72,11 @@ class LibraryTree(QWidget):
         lib_item.setData(("library", lib_id), Qt.ItemDataRole.UserRole)
         lib_item.setEditable(False)
         self.model.appendRow(lib_item)
+        # ... build folder/file structure first, then collapse single chains.
+        self._build_library_tree(lib_id, lib_item)
+        self._collapse_chains(lib_item)
+
+    def _build_library_tree(self, lib_id: int, lib_item: QStandardItem):
 
         folders = [p for (_, p) in self.db.library_folders(lib_id)]
         files = self.db.files_in_library(lib_id)
@@ -134,6 +139,33 @@ class LibraryTree(QWidget):
             file_item.setData(("file", f.id), Qt.ItemDataRole.UserRole)
             file_item.setEditable(False)
             parent_item.appendRow(file_item)
+
+    def _collapse_chains(self, node: QStandardItem):
+        """Post-order: merge any 'dir' node whose only child is another 'dir'
+        into a single compound node ('parent/child'). Library nodes and any
+        folder that has files or multiple children are left alone."""
+        for r in range(node.rowCount()):
+            self._collapse_chains(node.child(r))
+
+        data = node.data(Qt.ItemDataRole.UserRole)
+        if not data or data[0] != "dir":
+            return
+
+        while node.rowCount() == 1:
+            child = node.child(0)
+            child_data = child.data(Qt.ItemDataRole.UserRole)
+            if not child_data or child_data[0] != "dir":
+                break
+            # Take the child's grandchildren before destroying child.
+            grandchildren = []
+            while child.rowCount() > 0:
+                grandchildren.append(child.takeRow(0))
+            node.setText(f"{node.text()}/{child.text()}")
+            node.setData(child_data, Qt.ItemDataRole.UserRole)
+            node.setToolTip(child.toolTip())
+            node.removeRow(0)
+            for row in grandchildren:
+                node.appendRow(row)
 
     # search -------------------------------------------------------------
     def _on_search(self, text: str):
