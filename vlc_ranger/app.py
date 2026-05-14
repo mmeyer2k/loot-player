@@ -130,10 +130,14 @@ class MainWindow(QMainWindow):
         # Column 2: video + transport
         self.video = VlcWidget()
         self.video.double_clicked.connect(self._toggle_fullscreen)
+        # libVLC events fire on a worker thread; force a queued connection so
+        # the slot runs on the Qt main thread safely.
         self.video.loading_started.connect(
-            lambda: self.buffering_indicator.setVisible(True))
+            lambda: self.buffering_indicator.setVisible(True),
+            Qt.ConnectionType.QueuedConnection)
         self.video.playback_started.connect(
-            lambda: self.buffering_indicator.setVisible(False))
+            lambda: self.buffering_indicator.setVisible(False),
+            Qt.ConnectionType.QueuedConnection)
         self.video.set_volume(80)
 
         self.controls_wrap = self._build_transport_bar()
@@ -556,6 +560,10 @@ class MainWindow(QMainWindow):
         total = self.video.get_length()
         self.time_label.setText(f"{self._format_time(cur)} / {self._format_time(total)}")
         self._update_play_pause_icon()
+        # Belt-and-suspenders: in case the VLC event slipped past, hide the
+        # buffering indicator whenever playback is actually rolling.
+        if self.video.is_playing() and self.buffering_indicator.isVisible():
+            self.buffering_indicator.setVisible(False)
         if self.current_file and self.video.is_ended():
             self.current_file = None
             self._play_next()
