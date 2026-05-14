@@ -8,6 +8,9 @@ from PyQt6.QtWidgets import QFrame
 
 class VlcWidget(QFrame):
     double_clicked = pyqtSignal()
+    # Emitted from VLC's worker thread (queued — connect normally in Qt).
+    loading_started = pyqtSignal()
+    playback_started = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -20,6 +23,13 @@ class VlcWidget(QFrame):
 
         self.instance = vlc.Instance(["--no-video-title-show", "--quiet"])
         self.player = self.instance.media_player_new()
+        em = self.player.event_manager()
+        em.event_attach(vlc.EventType.MediaPlayerOpening,
+                        lambda _ev: self.loading_started.emit())
+        em.event_attach(vlc.EventType.MediaPlayerBuffering,
+                        lambda _ev: self.loading_started.emit())
+        em.event_attach(vlc.EventType.MediaPlayerPlaying,
+                        lambda _ev: self.playback_started.emit())
 
     def attach(self):
         wid = int(self.winId())

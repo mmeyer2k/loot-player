@@ -130,6 +130,10 @@ class MainWindow(QMainWindow):
         # Column 2: video + transport
         self.video = VlcWidget()
         self.video.double_clicked.connect(self._toggle_fullscreen)
+        self.video.loading_started.connect(
+            lambda: self.buffering_indicator.setVisible(True))
+        self.video.playback_started.connect(
+            lambda: self.buffering_indicator.setVisible(False))
         self.video.set_volume(80)
 
         self.controls_wrap = self._build_transport_bar()
@@ -216,13 +220,13 @@ class MainWindow(QMainWindow):
                   self.next_btn, self.shuffle_btn):
             row.addWidget(b)
 
-        # Buffering spinner — visible only while libVLC is loading/buffering.
+        # Buffering spinner — visible while libVLC is loading/buffering.
         self.buffering_indicator = qta.IconWidget()
         self.buffering_indicator.setIconSize(self._ICON_SIZE)
         self.buffering_indicator.setFixedSize(self._BUTTON_SIZE)
-        self._buffering_spin = qta.Spin(self.buffering_indicator)
+        self._buffering_spin = qta.Spin(self.buffering_indicator, interval=80)
         self.buffering_indicator.setIcon(
-            qta.icon("mdi6.loading", color="palette(mid)",
+            qta.icon("mdi6.loading", color="#999999",
                      animation=self._buffering_spin)
         )
         self.buffering_indicator.setToolTip("Buffering…")
@@ -526,6 +530,9 @@ class MainWindow(QMainWindow):
         self.current_file = f
         self.setWindowTitle(f"{APP_NAME} — {f.filename}")
         self.tree.set_playing(f.id)
+        # Show the spinner immediately; libVLC's MediaPlayerPlaying event
+        # will hide it once playback actually begins.
+        self.buffering_indicator.setVisible(True)
 
     def _toggle_pause(self):
         self.video.toggle_pause()
@@ -538,7 +545,6 @@ class MainWindow(QMainWindow):
         total = self.video.get_length()
         self.time_label.setText(f"{self._format_time(cur)} / {self._format_time(total)}")
         self._update_play_pause_icon()
-        self.buffering_indicator.setVisible(self.video.is_buffering())
         if self.current_file and self.video.is_ended():
             self.current_file = None
             self._play_next()
