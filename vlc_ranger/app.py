@@ -262,6 +262,7 @@ class MainWindow(QMainWindow):
         self.current_file = None
         self.setWindowTitle(APP_NAME)
         self.video.setToolTip("")
+        self.tree.set_playing(None)
 
     def _apply_chrome_visibility(self):
         """Apply current cinema/fullscreen state to all chrome widgets.
@@ -443,6 +444,7 @@ class MainWindow(QMainWindow):
         self.current_file = f
         self.setWindowTitle(f"{APP_NAME} — {f.filename}")
         self.video.setToolTip(f"{f.filename}\n{f.parent_dir}")
+        self.tree.set_playing(f.id)
 
     def _toggle_pause(self):
         self.video.toggle_pause()

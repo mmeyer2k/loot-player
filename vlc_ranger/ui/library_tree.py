@@ -29,6 +29,8 @@ class LibraryTree(QWidget):
         super().__init__(parent)
         self.db = db
         self._files_by_id: dict[int, FileRow] = {}
+        self._items_by_id: dict[int, QStandardItem] = {}
+        self._playing_id: int | None = None
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search…")
@@ -61,10 +63,15 @@ class LibraryTree(QWidget):
     # building -----------------------------------------------------------
     def reload(self):
         """Rebuild the entire tree from the DB."""
+        saved_playing = self._playing_id
         self.model.clear()
         self._files_by_id.clear()
+        self._items_by_id.clear()
+        self._playing_id = None
         for lib_id, name, type_ in self.db.list_libraries():
             self._build_library(lib_id, name, type_)
+        if saved_playing is not None:
+            self.set_playing(saved_playing)
 
     def _build_library(self, lib_id: int, name: str, type_: str):
         prefix = _TYPE_PREFIX.get(type_, "")
@@ -150,6 +157,7 @@ class LibraryTree(QWidget):
             file_item = QStandardItem(f.filename)
             file_item.setData(("file", f.id), Qt.ItemDataRole.UserRole)
             file_item.setEditable(False)
+            self._items_by_id[f.id] = file_item
             parent_item.appendRow(file_item)
 
     def _collapse_chains(self, node: QStandardItem):
@@ -178,6 +186,25 @@ class LibraryTree(QWidget):
             node.removeRow(0)
             for row in grandchildren:
                 node.appendRow(row)
+
+    # currently-playing highlight ---------------------------------------
+    def set_playing(self, file_id: int | None):
+        """Bold the tree row for the file currently being played; unbold
+        whichever row was previously bolded. Pass None when nothing plays."""
+        if self._playing_id is not None:
+            prev = self._items_by_id.get(self._playing_id)
+            if prev is not None:
+                font = prev.font()
+                font.setBold(False)
+                prev.setFont(font)
+        self._playing_id = file_id
+        if file_id is None:
+            return
+        item = self._items_by_id.get(file_id)
+        if item is not None:
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
 
     # search -------------------------------------------------------------
     def _on_search(self, text: str):
