@@ -26,6 +26,43 @@ APP_NAME = "vlc-ranger"
 OLD_APP_NAME = "vlc-library"
 
 
+class ClickJumpSlider(QSlider):
+    """QSlider where LMB anywhere on the trough jumps the value to that
+    position (instead of the default page-step behavior). Drag continues
+    to work — the slider stays held down until the button is released."""
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self.setSliderDown(True)
+            self._update_from_pos(ev.position().x())
+            ev.accept()
+        else:
+            super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if ev.buttons() & Qt.MouseButton.LeftButton:
+            self._update_from_pos(ev.position().x())
+            ev.accept()
+        else:
+            super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self.setSliderDown(False)
+            ev.accept()
+        else:
+            super().mouseReleaseEvent(ev)
+
+    def _update_from_pos(self, x: float):
+        if self.width() <= 0:
+            return
+        val = QStyle.sliderValueFromPosition(
+            self.minimum(), self.maximum(), int(x), self.width()
+        )
+        self.setValue(val)
+        self.sliderMoved.emit(val)
+
+
 def data_dir() -> Path:
     base = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
     new = base / APP_NAME
@@ -131,8 +168,8 @@ class MainWindow(QMainWindow):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(2)
 
-        # Top row: seek slider.
-        self.transport = QSlider(Qt.Orientation.Horizontal)
+        # Top row: seek slider with click-to-jump.
+        self.transport = ClickJumpSlider(Qt.Orientation.Horizontal)
         self.transport.setRange(0, 1000)
         self.transport.setMaximumHeight(16)
         self.transport.sliderMoved.connect(lambda v: self.video.set_position(v / 1000.0))
