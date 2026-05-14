@@ -1,0 +1,39 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <circle cx="256" cy="256" r="220" fill="black"/>
+  <circle cx="256" cy="256" r="190" stroke="white" stroke-width="10"/>
+
+  <!-- Play Button -->
+  <polygon points="235,170 235,250 305,210" fill="white"/>
+
+  <!-- Skull -->
+  <path d="M180 300
+           C180 240 220 200 256 200
+           C292 200 332 240 332 300
+           C332 330 320 350 300 365
+           L300 405
+           C300 420 212 420 212 405
+           L212 365
+           C192 350 180 330 180 300Z"
+        fill="white"/>
+
+  <!-- Eyes -->
+  <path d="M215 280 C230 255 255 255 265 280 C250 295 230 295 215 280Z" fill="black"/>
+  <path d="M297 280 C282 255 257 255 247 280 C262 295 282 295 297 280Z" fill="black"/>
+
+  <!-- Nose -->
+  <path d="M256 300 L242 325 H270 Z" fill="black"/>
+
+  <!-- Teeth -->
+  <rect x="225" y="370" width="10" height="35" rx="3" fill="black"/>
+  <rect x="245" y="370" width="10" height="35" rx="3" fill="black"/>
+  <rect x="265" y="370" width="10" height="35" rx="3" fill="black"/>
+  <rect x="285" y="370" width="10" height="35" rx="3" fill="black"/>
+
+  <!-- Backward Icon -->
+  <polygon points="95,255 125,230 125,280" fill="white"/>
+  <polygon points="130,255 160,230 160,280" fill="white"/>
+
+  <!-- Forward Icon -->
+  <polygon points="417,255 387,230 387,280" fill="white"/>
+  <polygon points="382,255 352,230 352,280" fill="white"/>
+</svg>

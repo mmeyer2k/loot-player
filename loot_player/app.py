@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QByteArray, QSize, QTimer
-from PyQt6.QtGui import QShortcut, QKeySequence
+from PyQt6.QtGui import QIcon, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel,
@@ -27,6 +27,7 @@ from loot_player.ui.queue_panel import QueuePanel
 APP_NAME = "loot-player"
 APP_BRAND = "loot"
 _PRIOR_APP_NAMES = ("vlc-ranger", "vlc-library")
+_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "loot.svg"
 
 
 class ClickJumpSlider(QSlider):
@@ -585,7 +586,10 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    icon = QIcon(str(_LOGO_PATH))
+    app.setWindowIcon(icon)
     w = MainWindow()
+    w.setWindowIcon(icon)
     w.show()
     w.video.attach()
     sys.exit(app.exec())

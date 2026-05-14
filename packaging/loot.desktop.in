@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=loot
+GenericName=Media Player
+Comment=Local media library and player
+Exec=@REPO@/main.py
+Icon=@REPO@/assets/loot.svg
+Terminal=false
+Categories=AudioVideo;Player;Video;
+StartupWMClass=loot-player
