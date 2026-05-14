@@ -1,6 +1,6 @@
-"""vlc-ranger entrypoint. See vlc_ranger.app.main for the real code."""
+"""vlc-ranger entrypoint. See loot_player.app.main for the real code."""
 
-from vlc_ranger.app import main
+from loot_player.app import main
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from vlc_ranger.db import LibraryDB
+from loot_player.db import LibraryDB
 
 
 @pytest.fixture

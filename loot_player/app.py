@@ -16,16 +16,17 @@ from PyQt6.QtWidgets import (
 
 import qtawesome as qta
 
-from vlc_ranger.db import LibraryDB
-from vlc_ranger.models import FileRow, QueueModel
-from vlc_ranger.player import VlcWidget
-from vlc_ranger.scanner import Scanner
-from vlc_ranger.ui.library_editor import LibraryEditor
-from vlc_ranger.ui.library_tree import LibraryTree
-from vlc_ranger.ui.queue_panel import QueuePanel
+from loot_player.db import LibraryDB
+from loot_player.models import FileRow, QueueModel
+from loot_player.player import VlcWidget
+from loot_player.scanner import Scanner
+from loot_player.ui.library_editor import LibraryEditor
+from loot_player.ui.library_tree import LibraryTree
+from loot_player.ui.queue_panel import QueuePanel
 
-APP_NAME = "vlc-ranger"
-OLD_APP_NAME = "vlc-library"
+APP_NAME = "loot-player"
+APP_BRAND = "loot"
+_PRIOR_APP_NAMES = ("vlc-ranger", "vlc-library")
 
 
 class ClickJumpSlider(QSlider):
@@ -68,12 +69,15 @@ class ClickJumpSlider(QSlider):
 def data_dir() -> Path:
     base = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
     new = base / APP_NAME
-    old = base / OLD_APP_NAME
     if new.exists():
         return new
-    if old.exists():
-        os.rename(old, new)        # atomic on the same filesystem
-        return new
+    # Migration chain: pick up the most recent prior name we can find and
+    # atomically rename the directory. Order matters — earliest entry wins.
+    for prior in _PRIOR_APP_NAMES:
+        old = base / prior
+        if old.exists():
+            os.rename(old, new)        # atomic on the same filesystem
+            return new
     new.mkdir(parents=True, exist_ok=True)
     return new
 
@@ -89,7 +93,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(APP_BRAND)
         self.resize(1400, 850)
         self.db = LibraryDB(data_dir() / "library.db")
         self.scanner: Optional[Scanner] = None
@@ -311,7 +315,7 @@ class MainWindow(QMainWindow):
     def _stop(self):
         self.video.stop()
         self.current_file = None
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(APP_BRAND)
         self.tree.set_playing(None)
 
     def _cycle_shuffle(self):
@@ -543,7 +547,7 @@ class MainWindow(QMainWindow):
         self.video.attach()
         self.video.play_path(f.path)
         self.current_file = f
-        self.setWindowTitle(f"{APP_NAME} — {f.filename}")
+        self.setWindowTitle(f"{APP_BRAND} — {f.filename}")
         self.tree.set_playing(f.id)
         # Show the spinner immediately; libVLC's MediaPlayerPlaying event
         # will hide it once playback actually begins.

@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from vlc_ranger.models import FileRow
+from loot_player.models import FileRow
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS libraries (

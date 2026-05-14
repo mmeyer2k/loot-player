@@ -1,4 +1,4 @@
-from vlc_ranger.matching import parse_generic
+from loot_player.matching import parse_generic
 
 
 def test_generic_strips_extension():
@@ -13,7 +13,7 @@ def test_generic_handles_no_extension():
     assert parse_generic("README") == {"title": "README"}
 
 
-from vlc_ranger.matching import parse_movie
+from loot_player.matching import parse_movie
 
 
 def test_movie_paren_year():
@@ -51,7 +51,7 @@ def test_movie_implausible_year_ignored():
     assert out["year"] is None
 
 
-from vlc_ranger.matching import parse_tv
+from loot_player.matching import parse_tv
 
 
 def test_tv_sxxeyy_pattern():
@@ -111,7 +111,7 @@ def test_tv_one_x_at_start_uses_folder_for_series():
     assert out["episode"] == 7
 
 
-from vlc_ranger.matching import parse_music
+from loot_player.matching import parse_music
 
 
 def test_music_three_level_layout():
@@ -142,7 +142,7 @@ def test_music_flat_no_artist_no_album():
     assert out["title"] == "random"
 
 
-from vlc_ranger.matching import parse
+from loot_player.matching import parse
 
 
 def test_dispatch_movies():

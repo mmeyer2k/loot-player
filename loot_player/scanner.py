@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from vlc_ranger.matching import parse
+from loot_player.matching import parse
 
 
 VIDEO_EXTS = {

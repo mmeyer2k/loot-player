@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from vlc_ranger.db import LibraryDB
+from loot_player.db import LibraryDB
 
 
 def _insert_files(db: LibraryDB, library_id: int, names: list[str], parent_dir: str = "/m"):

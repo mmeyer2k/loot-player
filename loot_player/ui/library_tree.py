@@ -8,8 +8,8 @@ from PyQt6.QtWidgets import (
     QLineEdit, QMenu, QPushButton, QTreeView, QVBoxLayout, QWidget,
 )
 
-from vlc_ranger.db import LibraryDB
-from vlc_ranger.models import FileRow
+from loot_player.db import LibraryDB
+from loot_player.models import FileRow
 
 
 
