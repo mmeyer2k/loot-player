@@ -67,6 +67,16 @@ class QueueModel(QStandardItemModel):
         self._rebuild()
         return f
 
+    def take_random(self) -> Optional[FileRow]:
+        """Pop and return a random file from the queue, or None if empty."""
+        import random
+        if not self._files:
+            return None
+        idx = random.randrange(len(self._files))
+        f = self._files.pop(idx)
+        self._rebuild()
+        return f
+
     def _append_row(self, n: int, f: FileRow):
         self.appendRow([QStandardItem(str(n)), QStandardItem(f.filename)])
 
