@@ -330,6 +330,39 @@ class LibraryDB:
         ).fetchone()
         return FileRow(*row) if row else None
 
+    def random_file_in_library(self, library_id: int,
+                               exclude_id: int | None = None) -> FileRow | None:
+        cols = """id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                  title, year, series, season, episode, artist, album, track"""
+        if exclude_id is None:
+            sql = f"""SELECT {cols} FROM files
+                      WHERE library_id=?
+                      ORDER BY RANDOM() LIMIT 1"""
+            args: tuple = (library_id,)
+        else:
+            sql = f"""SELECT {cols} FROM files
+                      WHERE library_id=? AND id != ?
+                      ORDER BY RANDOM() LIMIT 1"""
+            args = (library_id, exclude_id)
+        row = self.conn.execute(sql, args).fetchone()
+        return FileRow(*row) if row else None
+
+    def random_file_anywhere(self, exclude_id: int | None = None) -> FileRow | None:
+        cols = """id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                  title, year, series, season, episode, artist, album, track"""
+        if exclude_id is None:
+            sql = f"""SELECT {cols} FROM files
+                      WHERE library_id IS NOT NULL
+                      ORDER BY RANDOM() LIMIT 1"""
+            args: tuple = ()
+        else:
+            sql = f"""SELECT {cols} FROM files
+                      WHERE library_id IS NOT NULL AND id != ?
+                      ORDER BY RANDOM() LIMIT 1"""
+            args = (exclude_id,)
+        row = self.conn.execute(sql, args).fetchone()
+        return FileRow(*row) if row else None
+
     def tv_shows(self, library_id: int) -> list[tuple[str, int]]:
         """Returns (series, episode_count). NULL series shows as '(Unsorted)'."""
         return list(self.conn.execute(
