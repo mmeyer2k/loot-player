@@ -12,7 +12,6 @@ from vlc_ranger.db import LibraryDB
 from vlc_ranger.models import FileRow
 
 
-_TYPE_PREFIX = {"movies": "[M] ", "tv": "[T] ", "music": "[♪] ", "generic": "[G] "}
 
 
 class LibraryTree(QWidget):
@@ -74,8 +73,7 @@ class LibraryTree(QWidget):
             self.set_playing(saved_playing)
 
     def _build_library(self, lib_id: int, name: str, type_: str):
-        prefix = _TYPE_PREFIX.get(type_, "")
-        lib_item = QStandardItem(f"{prefix}{name}")
+        lib_item = QStandardItem(name)
         lib_item.setData(("library", lib_id), Qt.ItemDataRole.UserRole)
         lib_item.setEditable(False)
         self.model.appendRow(lib_item)
