@@ -306,6 +306,30 @@ class LibraryDB:
                  FROM files WHERE library_id=? ORDER BY filename"""
         return [FileRow(*r) for r in self.conn.execute(sql, (library_id,))]
 
+    def next_file_in_folder(self, library_id: int, parent_dir: str,
+                            filename: str) -> FileRow | None:
+        cols = """id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                  title, year, series, season, episode, artist, album, track"""
+        row = self.conn.execute(
+            f"""SELECT {cols} FROM files
+                WHERE library_id=? AND parent_dir=? AND filename > ?
+                ORDER BY filename ASC LIMIT 1""",
+            (library_id, parent_dir, filename),
+        ).fetchone()
+        return FileRow(*row) if row else None
+
+    def prev_file_in_folder(self, library_id: int, parent_dir: str,
+                            filename: str) -> FileRow | None:
+        cols = """id, library_id, path, parent_dir, filename, ext, size, mtime, duration,
+                  title, year, series, season, episode, artist, album, track"""
+        row = self.conn.execute(
+            f"""SELECT {cols} FROM files
+                WHERE library_id=? AND parent_dir=? AND filename < ?
+                ORDER BY filename DESC LIMIT 1""",
+            (library_id, parent_dir, filename),
+        ).fetchone()
+        return FileRow(*row) if row else None
+
     def tv_shows(self, library_id: int) -> list[tuple[str, int]]:
         """Returns (series, episode_count). NULL series shows as '(Unsorted)'."""
         return list(self.conn.execute(
