@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         self._cinema = False
         self._fullscreen = False
         self._shuffle_mode: str = "off"
+        self._tree_pane_width = 300
         self._queue_pane_width = 300
 
         self._build_ui()
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
 
         self._restore_state()
         self._update_queue_visibility()
+        self._ensure_tree_pane_width()
 
         self.tick = QTimer(self)
         self.tick.setInterval(500)
@@ -353,6 +355,7 @@ class MainWindow(QMainWindow):
             self.queue_panel.setVisible(False)
         else:
             self._update_queue_visibility()
+            self._ensure_tree_pane_width()
         if hide_bottom:
             self.statusBar().setVisible(False)
         else:
@@ -410,8 +413,21 @@ class MainWindow(QMainWindow):
         sizes[2] = queue_w
         self.root_split.setSizes(sizes)
 
+    def _ensure_tree_pane_width(self):
+        # Same Qt-splitter-collapses-to-0 workaround as _ensure_queue_pane_width,
+        # applied to the library tree on the left.
+        sizes = self.root_split.sizes()
+        if len(sizes) < 3 or sizes[0] > 0:
+            return
+        tree_w = self._tree_pane_width
+        sizes[1] = max(200, sizes[1] - tree_w)
+        sizes[0] = tree_w
+        self.root_split.setSizes(sizes)
+
     def _on_root_split_moved(self, *_):
         sizes = self.root_split.sizes()
+        if len(sizes) >= 3 and sizes[0] > 0:
+            self._tree_pane_width = sizes[0]
         if len(sizes) >= 3 and sizes[2] > 0:
             self._queue_pane_width = sizes[2]
 
