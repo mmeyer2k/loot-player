@@ -5,17 +5,18 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QByteArray, QSize, QTimer
+from PyQt6.QtCore import Qt, QByteArray, QEvent, QSize, QTimer
 from PyQt6.QtGui import QIcon, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel,
     QStatusBar, QSlider, QMessageBox,
-    QStyle,
+    QStyle, QMenu,
 )
 
 import qtawesome as qta
 
+from loot_player.cast import CastController
 from loot_player.db import LibraryDB
 from loot_player.models import FileRow, QueueModel
 from loot_player.player import VlcWidget
@@ -148,6 +149,12 @@ class MainWindow(QMainWindow):
             Qt.ConnectionType.QueuedConnection)
         self.video.set_volume(80)
 
+        self.cast = CastController(self.video.instance, self)
+        self.cast.start()
+        self._active_cast = None
+        self._active_cast_name: str = ""
+        self._build_cast_overlay()
+
         self.controls_wrap = self._build_transport_bar()
 
         video_wrap = QWidget()
@@ -163,6 +170,7 @@ class MainWindow(QMainWindow):
         self.queue_panel.remove_requested.connect(self.queue_model.remove_indices)
         self.queue_panel.remove_requested.connect(lambda *_: self._persist_queue())
         self.queue_panel.play_at_requested.connect(self._play_queue_index)
+        self.queue_model.queue_reordered.connect(self._persist_queue)
         self.queue_panel.setVisible(False)
 
         # Auto-show/hide queue column based on queue contents.
@@ -275,6 +283,13 @@ class MainWindow(QMainWindow):
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         row.addWidget(self.volume_slider)
 
+        self.cast_btn = self._icon_button("mdi6.cast", slot=self._show_cast_menu)
+        self.cast_btn.setToolTip("Cast to device")
+        if not self.cast.available:
+            self.cast_btn.setEnabled(False)
+            self.cast_btn.setToolTip("Casting unavailable on this system")
+        row.addWidget(self.cast_btn)
+
         self.cinema_btn = self._icon_button("mdi6.fit-to-screen-outline",
                                             slot=self._toggle_cinema_mode,
                                             checkable=True)
@@ -323,6 +338,97 @@ class MainWindow(QMainWindow):
         self.current_file = None
         self.setWindowTitle(APP_BRAND)
         self.tree.set_playing(None)
+
+    # Casting ----------------------------------------------------------
+    def _build_cast_overlay(self):
+        """Translucent panel inside the video frame, shown while casting."""
+        self.cast_overlay = QWidget(self.video)
+        self.cast_overlay.setObjectName("CastOverlay")
+        self.cast_overlay.setStyleSheet(
+            "QWidget#CastOverlay { background-color: rgba(0, 0, 0, 215); }"
+            " QLabel { color: white; background: transparent; }"
+        )
+        lay = QVBoxLayout(self.cast_overlay)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.setSpacing(16)
+
+        self._cast_icon_label = QLabel()
+        self._cast_icon_label.setPixmap(
+            qta.icon("mdi6.cast-connected", color="white").pixmap(96, 96))
+        self._cast_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._cast_icon_label)
+
+        self._cast_overlay_text = QLabel("")
+        self._cast_overlay_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = self._cast_overlay_text.font()
+        font.setPointSize(max(font.pointSize() + 4, 16))
+        self._cast_overlay_text.setFont(font)
+        lay.addWidget(self._cast_overlay_text)
+
+        self.cast_overlay.hide()
+        self.video.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if obj is self.video and event.type() == QEvent.Type.Resize:
+            self.cast_overlay.setGeometry(0, 0, self.video.width(), self.video.height())
+        return super().eventFilter(obj, event)
+
+    @staticmethod
+    def _renderer_name(item) -> str:
+        try:
+            n = item.name()
+        except Exception:
+            return "Unknown device"
+        if isinstance(n, bytes):
+            return n.decode("utf-8", "replace")
+        return n or "Unknown device"
+
+    def _show_cast_menu(self):
+        menu = QMenu(self)
+        devices = self.cast.devices()
+        if devices:
+            for item in devices:
+                name = self._renderer_name(item)
+                act = menu.addAction(name)
+                act.setCheckable(True)
+                act.setChecked(item is self._active_cast)
+                act.triggered.connect(lambda _checked=False, it=item, nm=name:
+                                      self._set_cast(it, nm))
+        else:
+            empty = menu.addAction("Searching for devices…")
+            empty.setEnabled(False)
+        if self._active_cast is not None:
+            menu.addSeparator()
+            stop_act = menu.addAction("Stop casting")
+            stop_act.triggered.connect(lambda: self._set_cast(None, ""))
+        # Drop the menu just below the cast button.
+        pos = self.cast_btn.mapToGlobal(self.cast_btn.rect().bottomLeft())
+        menu.exec(pos)
+
+    def _set_cast(self, item, name: str):
+        """Switch the renderer target. Pass (None, '') to revert to local."""
+        cur = self.current_file
+        was_playing = cur is not None
+        self.video.stop()
+        try:
+            self.video.set_renderer(item)
+        except Exception:
+            pass
+        self._active_cast = item
+        self._active_cast_name = name
+        if item is not None:
+            self.cast_btn.setIcon(qta.icon("mdi6.cast-connected"))
+            self.cast_btn.setToolTip(f"Casting to: {name}")
+            self._cast_overlay_text.setText(f"Casting to {name}")
+            self.cast_overlay.setGeometry(0, 0, self.video.width(), self.video.height())
+            self.cast_overlay.show()
+            self.cast_overlay.raise_()
+        else:
+            self.cast_btn.setIcon(qta.icon("mdi6.cast"))
+            self.cast_btn.setToolTip("Cast to device")
+            self.cast_overlay.hide()
+        if was_playing and cur is not None:
+            self._play(cur)
 
     def _cycle_shuffle(self):
         idx = self._SHUFFLE_CYCLE.index(self._shuffle_mode)
@@ -618,8 +724,11 @@ class MainWindow(QMainWindow):
         if self.video.is_playing() and self.buffering_indicator.isVisible():
             self.buffering_indicator.setVisible(False)
         if self.current_file and self.video.is_ended():
-            self.current_file = None
-            self._play_next()
+            nxt = self._take_next_for_mode()
+            if nxt:
+                self._play(nxt)
+            else:
+                self.current_file = None
 
     # cleanup ----------------------------------------------------------
     def closeEvent(self, ev):
@@ -627,6 +736,7 @@ class MainWindow(QMainWindow):
         if self.scanner and self.scanner.isRunning():
             self.scanner.cancel()
             self.scanner.wait(2000)
+        self.cast.stop()
         self.db.ui_set("splitter.root", self.root_split.saveState().toHex().data().decode())
         super().closeEvent(ev)
 

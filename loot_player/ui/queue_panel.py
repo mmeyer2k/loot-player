@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QPushButton,
     QTableView, QVBoxLayout, QWidget,
 )
+
+import qtawesome as qta
 
 
 class QueuePanel(QWidget):
@@ -22,9 +24,17 @@ class QueuePanel(QWidget):
         self.view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.view.doubleClicked.connect(lambda idx: self.play_at_requested.emit(idx.row()))
 
-        next_btn = QPushButton("▶ Next")
-        clear_btn = QPushButton("Clear")
-        remove_btn = QPushButton("Remove")
+        self.view.setDragEnabled(True)
+        self.view.setAcceptDrops(True)
+        self.view.setDropIndicatorShown(True)
+        self.view.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.view.setDragDropOverwriteMode(False)
+        self.view.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.view.verticalHeader().setVisible(False)
+
+        next_btn = QPushButton(qta.icon("mdi6.skip-next"), "Next")
+        clear_btn = QPushButton(qta.icon("mdi6.delete-sweep"), "Clear")
+        remove_btn = QPushButton(qta.icon("mdi6.playlist-minus"), "Remove")
         next_btn.clicked.connect(self.play_next_requested.emit)
         clear_btn.clicked.connect(self.clear_requested.emit)
         remove_btn.clicked.connect(

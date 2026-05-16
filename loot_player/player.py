@@ -51,6 +51,12 @@ class VlcWidget(QFrame):
     def stop(self):
         self.player.stop()
 
+    def set_renderer(self, item) -> int:
+        """Route playback to a renderer (e.g. Chromecast). Pass None to clear.
+
+        Must be called while stopped; libVLC ignores it mid-playback."""
+        return self.player.set_renderer(item)
+
     def set_position(self, frac: float):
         self.player.set_position(max(0.0, min(1.0, frac)))
 
