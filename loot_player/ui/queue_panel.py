@@ -11,14 +11,16 @@ class QueuePanel(QWidget):
     play_next_requested = pyqtSignal()
     clear_requested = pyqtSignal()
     remove_requested = pyqtSignal(list)        # list[int] of row indices
+    play_at_requested = pyqtSignal(int)        # row index to play immediately
 
     def __init__(self, queue_model, parent=None):
         super().__init__(parent)
         self.view = QTableView()
         self.view.setModel(queue_model)
-        self.view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.view.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.view.doubleClicked.connect(lambda idx: self.play_at_requested.emit(idx.row()))
 
         next_btn = QPushButton("▶ Next")
         clear_btn = QPushButton("Clear")

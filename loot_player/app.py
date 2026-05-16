@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         self._cinema = False
         self._fullscreen = False
         self._shuffle_mode: str = "off"
+        self._queue_pane_width = 300
 
         self._build_ui()
 
@@ -159,6 +160,7 @@ class MainWindow(QMainWindow):
         self.queue_panel.clear_requested.connect(self._clear_queue)
         self.queue_panel.remove_requested.connect(self.queue_model.remove_indices)
         self.queue_panel.remove_requested.connect(lambda *_: self._persist_queue())
+        self.queue_panel.play_at_requested.connect(self._play_queue_index)
         self.queue_panel.setVisible(False)
 
         # Auto-show/hide queue column based on queue contents.
@@ -174,6 +176,7 @@ class MainWindow(QMainWindow):
         root_split.setStretchFactor(0, 0)
         root_split.setStretchFactor(1, 1)
         root_split.setStretchFactor(2, 0)
+        root_split.splitterMoved.connect(self._on_root_split_moved)
         self.root_split = root_split
         self.setCentralWidget(root_split)
 
@@ -385,12 +388,32 @@ class MainWindow(QMainWindow):
     def _update_queue_visibility(self):
         has_items = self.queue_model.rowCount() > 0
         self.queue_panel.setVisible(has_items)
+        if has_items and hasattr(self, "root_split"):
+            self._ensure_queue_pane_width()
         # Shuffle is meaningless while the queue is driving playback —
         # disable the button so the state is obvious, and re-apply the
         # tooltip so the disabled reason is visible.
         if hasattr(self, "shuffle_btn"):
             self.shuffle_btn.setEnabled(not has_items)
             self._apply_shuffle_visual()
+
+    def _ensure_queue_pane_width(self):
+        # QSplitter collapses a hidden child to width 0, and the saved state
+        # carries that 0 across restarts. Re-showing the panel via
+        # setVisible(True) alone leaves the pane at 0 width — give it real
+        # space by stealing from the video column.
+        sizes = self.root_split.sizes()
+        if len(sizes) < 3 or sizes[2] > 0:
+            return
+        queue_w = self._queue_pane_width
+        sizes[1] = max(200, sizes[1] - queue_w)
+        sizes[2] = queue_w
+        self.root_split.setSizes(sizes)
+
+    def _on_root_split_moved(self, *_):
+        sizes = self.root_split.sizes()
+        if len(sizes) >= 3 and sizes[2] > 0:
+            self._queue_pane_width = sizes[2]
 
     # First-load --------------------------------------------------------
     def _restore_state(self):
@@ -501,6 +524,15 @@ class MainWindow(QMainWindow):
         f = self._take_next_for_mode()
         if f is None:
             return
+        self._play(f)
+
+    def _play_queue_index(self, row: int):
+        files = self.queue_model.files()
+        if not (0 <= row < len(files)):
+            return
+        f = files[row]
+        self.queue_model.remove_indices([row])
+        self._persist_queue()
         self._play(f)
 
     def _take_next_for_mode(self):

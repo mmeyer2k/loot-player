@@ -29,7 +29,7 @@ class FileRow:
 class QueueModel(QStandardItemModel):
     def __init__(self):
         super().__init__()
-        self.setHorizontalHeaderLabels(["#", "File"])
+        self.setHorizontalHeaderLabels(["File"])
         self._files: list[FileRow] = []
 
     def files(self) -> list[FileRow]:
@@ -38,7 +38,7 @@ class QueueModel(QStandardItemModel):
     def append(self, files: list[FileRow]):
         for f in files:
             self._files.append(f)
-            self._append_row(len(self._files), f)
+            self._append_row(f)
 
     def prepend(self, files: list[FileRow]):
         for i, f in enumerate(files):
@@ -77,10 +77,10 @@ class QueueModel(QStandardItemModel):
         self._rebuild()
         return f
 
-    def _append_row(self, n: int, f: FileRow):
-        self.appendRow([QStandardItem(str(n)), QStandardItem(f.filename)])
+    def _append_row(self, f: FileRow):
+        self.appendRow([QStandardItem(f.filename)])
 
     def _rebuild(self):
         self.setRowCount(0)
-        for i, f in enumerate(self._files, 1):
-            self._append_row(i, f)
+        for f in self._files:
+            self._append_row(f)
