@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, pyqtSignal
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QTimer, pyqtSignal
 from PyQt6.QtGui import QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import (
     QLineEdit, QMenu, QPushButton, QTreeView, QVBoxLayout, QWidget,
@@ -33,6 +33,10 @@ class LibraryTree(QWidget):
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search…")
         self.search.textChanged.connect(self._on_search)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(200)
+        self._search_timer.timeout.connect(self._apply_search)
 
         self.model = QStandardItemModel()
         self.proxy = QSortFilterProxyModel()
@@ -205,8 +209,21 @@ class LibraryTree(QWidget):
 
     # search -------------------------------------------------------------
     def _on_search(self, text: str):
-        self.proxy.setFilterFixedString(text.strip())
-        if text.strip():
+        # Debounce: 1-char queries match too much to be useful and the
+        # recursive filter pass is expensive on large libraries. Clearing
+        # the field applies immediately so the tree restores without lag.
+        if not text.strip():
+            self._search_timer.stop()
+            self._apply_search()
+            return
+        self._search_timer.start()
+
+    def _apply_search(self):
+        text = self.search.text().strip()
+        if len(text) == 1:
+            return
+        self.proxy.setFilterFixedString(text)
+        if text:
             self.tree.expandAll()
 
     # interaction --------------------------------------------------------
