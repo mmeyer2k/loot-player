@@ -83,7 +83,9 @@ class VlcWidget(QFrame):
         self.player.audio_set_mute(bool(m))
 
     def get_mute(self) -> bool:
-        return bool(self.player.audio_get_mute())
+        # audio_get_mute returns -1 when no audio output exists yet; treat
+        # that as "not muted" rather than letting bool(-1) report True.
+        return self.player.audio_get_mute() == 1
 
     def get_time(self) -> int:
         """Current playback time in milliseconds; -1 if unknown."""

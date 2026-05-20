@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
         self._shuffle_mode: str = "off"
         self._tree_pane_width = 300
         self._queue_pane_width = 300
+        self._is_muted = False
 
         self._build_ui()
 
@@ -147,7 +148,14 @@ class MainWindow(QMainWindow):
         self.video.playback_started.connect(
             lambda: self.buffering_indicator.setVisible(False),
             Qt.ConnectionType.QueuedConnection)
+        # libVLC's audio output is created lazily on first play. Its initial
+        # mute state can be inherited from the system audio backend (e.g. a
+        # persisted PulseAudio sink-input mute), so once the output exists
+        # we push the UI's state to libVLC to keep them in sync.
+        self.video.playback_started.connect(
+            self._sync_audio_state, Qt.ConnectionType.QueuedConnection)
         self.video.set_volume(80)
+        self.video.set_mute(False)
 
         self.cast = CastController(self.video.instance, self)
         self.cast.start()
@@ -316,18 +324,26 @@ class MainWindow(QMainWindow):
 
     def _on_volume_changed(self, v: int):
         self.video.set_volume(v)
-        if v > 0 and self.video.get_mute():
+        if v > 0 and self._is_muted:
+            self._is_muted = False
             self.video.set_mute(False)
         self._update_mute_icon()
 
     def _toggle_mute(self):
-        self.video.set_mute(not self.video.get_mute())
+        self._is_muted = not self._is_muted
+        self.video.set_mute(self._is_muted)
         self._update_mute_icon()
 
     def _update_mute_icon(self):
-        muted = self.video.get_mute() or self.video.get_volume() == 0
+        muted = self._is_muted or self.volume_slider.value() == 0
         name = "mdi6.volume-mute" if muted else "mdi6.volume-high"
         self.mute_btn.setIcon(qta.icon(name))
+
+    def _sync_audio_state(self):
+        # Called from MediaPlayerPlaying — audio output now exists, so push
+        # the UI's source-of-truth state to libVLC.
+        self.video.set_volume(self.volume_slider.value())
+        self.video.set_mute(self._is_muted)
 
     def _update_play_pause_icon(self):
         name = "mdi6.pause" if self.video.is_playing() else "mdi6.play"
