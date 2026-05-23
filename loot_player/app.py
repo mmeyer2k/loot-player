@@ -24,6 +24,7 @@ from loot_player.scanner import Scanner
 from loot_player.ui.library_editor import LibraryEditor
 from loot_player.ui.library_tree import LibraryTree
 from loot_player.ui.queue_panel import QueuePanel
+from loot_player.version import __version__
 
 APP_NAME = "loot-player"
 APP_BRAND = "loot"
@@ -757,8 +758,15 @@ class MainWindow(QMainWindow):
         super().closeEvent(ev)
 
 
-def main():
-    app = QApplication(sys.argv)
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv if argv is None else argv)
+    args = argv[1:]
+
+    if "--version" in args:
+        print(__version__)
+        return 0
+
+    app = QApplication(argv)
     app.setApplicationName(APP_NAME)
     icon = QIcon(str(_LOGO_PATH))
     app.setWindowIcon(icon)
@@ -766,4 +774,4 @@ def main():
     w.setWindowIcon(icon)
     w.show()
     w.video.attach()
-    sys.exit(app.exec())
+    return app.exec()
