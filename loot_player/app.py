@@ -812,7 +812,12 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName(APP_NAME)
     icon = QIcon(_icon_path())
     app.setWindowIcon(icon)
-    w = MainWindow()
+    try:
+        w = MainWindow()
+    except RuntimeError as exc:
+        print(f"loot-player: {exc}", file=sys.stderr)
+        QMessageBox.critical(None, APP_BRAND, str(exc))
+        return 1
     w.setWindowIcon(icon)
     w.show()
     w.video.attach()
