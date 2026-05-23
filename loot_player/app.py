@@ -758,6 +758,36 @@ class MainWindow(QMainWindow):
         super().closeEvent(ev)
 
 
+def selfcheck() -> int:
+    """Smoke-test the runtime so a broken bundle never ships.
+
+    Verifies Qt is importable, libVLC loads, and VLC plugins are discoverable
+    (an empty/blank plugin path yields no audio-output modules). Returns 0 on
+    success, 1 otherwise. Run in CI as `--selfcheck` under xvfb.
+    """
+    try:
+        import PyQt6.QtWidgets  # noqa: F401  (import-only Qt check)
+        import vlc
+    except Exception as exc:  # pragma: no cover - import failure path
+        print(f"selfcheck: import failed: {exc}", file=sys.stderr)
+        return 1
+
+    inst = vlc.Instance(["--quiet"])
+    if inst is None:
+        print("selfcheck: vlc.Instance() returned None (libVLC/plugins not loadable)",
+              file=sys.stderr)
+        return 1
+
+    if not inst.audio_output_list_get():
+        print("selfcheck: no VLC audio output modules found (PYTHON_VLC_MODULE_PATH wrong?)",
+              file=sys.stderr)
+        return 1
+
+    version = (vlc.libvlc_get_version() or b"unknown").decode(errors="replace")
+    print(f"selfcheck OK: loot-player {__version__}, libvlc {version}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     args = argv[1:]
@@ -765,6 +795,9 @@ def main(argv: list[str] | None = None) -> int:
     if "--version" in args:
         print(__version__)
         return 0
+
+    if "--selfcheck" in args:
+        return selfcheck()
 
     app = QApplication(argv)
     app.setApplicationName(APP_NAME)
