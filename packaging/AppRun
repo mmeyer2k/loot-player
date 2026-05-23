@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# AppImage entrypoint. Points python-vlc at the bundled libVLC, ensures the
+# bundled libs and the xcb platform plugin load, then runs the app.
+set -euo pipefail
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+
+export PYTHON_VLC_LIB_PATH="${HERE}/usr/lib/libvlc.so"
+export PYTHON_VLC_MODULE_PATH="${HERE}/usr/lib/vlc/plugins"
+export LD_LIBRARY_PATH="${HERE}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export LOOT_PLAYER_ICON="${HERE}/loot-player.png"
+
+# libVLC's set_xwindow needs the xcb platform plugin; force it under KDE
+# (mirrors the dev Makefile) unless the user already chose a platform.
+if [ -z "${QT_QPA_PLATFORM:-}" ]; then
+    case "${XDG_CURRENT_DESKTOP:-}" in
+        *KDE*) export QT_QPA_PLATFORM=xcb ;;
+    esac
+fi
+
+exec "${HERE}/usr/python/bin/python3" -m loot_player "$@"
