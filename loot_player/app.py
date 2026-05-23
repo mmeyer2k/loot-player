@@ -758,6 +758,15 @@ class MainWindow(QMainWindow):
         super().closeEvent(ev)
 
 
+def _icon_path() -> str:
+    """Window-icon path. Honors LOOT_PLAYER_ICON (set by the AppImage AppRun),
+    falling back to the in-repo SVG for source runs."""
+    env = os.environ.get("LOOT_PLAYER_ICON")
+    if env and Path(env).is_file():
+        return env
+    return str(_LOGO_PATH)
+
+
 def selfcheck() -> int:
     """Smoke-test the runtime so a broken bundle never ships.
 
@@ -801,7 +810,7 @@ def main(argv: list[str] | None = None) -> int:
 
     app = QApplication(argv)
     app.setApplicationName(APP_NAME)
-    icon = QIcon(str(_LOGO_PATH))
+    icon = QIcon(_icon_path())
     app.setWindowIcon(icon)
     w = MainWindow()
     w.setWindowIcon(icon)
