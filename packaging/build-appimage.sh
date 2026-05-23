@@ -44,7 +44,7 @@ VLC_PLUGINS="$(dirname "${LIBVLC}")/vlc/plugins"
 
 echo ">> Copying libVLC + plugin tree"
 cp -L "${LIBVLC}"* "${APPDIR}/usr/lib/" 2>/dev/null || cp -L "${LIBVLC}" "${APPDIR}/usr/lib/libvlc.so"
-cp -L "${LIBVLCCORE}" "${APPDIR}/usr/lib/" || true
+cp -L "${LIBVLCCORE}" "${APPDIR}/usr/lib/" || echo "WARN: could not copy libvlccore (${LIBVLCCORE})"
 ln -sf "$(basename "${LIBVLC}")" "${APPDIR}/usr/lib/libvlc.so" 2>/dev/null || true
 cp -a "${VLC_PLUGINS}" "${APPDIR}/usr/lib/vlc/plugins"
 
