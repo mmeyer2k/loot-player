@@ -633,7 +633,7 @@ class MainWindow(QMainWindow):
             lambda n, d: self.statusBar().showMessage(f"Scanning {n}: {d}")
         )
         self.scanner.finished_scan.connect(
-            lambda total: (self.statusBar().showMessage(f"Indexed {total} file(s)"),
+            lambda total: (self.statusBar().showMessage(f"Indexed {total} file(s)", 10_000),
                            self.tree.reload())
         )
         self.scanner.start()
