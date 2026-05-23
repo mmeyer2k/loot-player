@@ -34,8 +34,10 @@ echo ">> Installing loot-player and deps into the bundle"
 "${PYBIN}" -m pip install "${REPO}"
 
 echo ">> Locating system libVLC"
-LIBVLC="$(ldconfig -p | awk '/libvlc\.so/{print $NF; exit}')"
-LIBVLCCORE="$(ldconfig -p | awk '/libvlccore\.so/{print $NF; exit}')"
+# NB: no early `exit` in awk — exiting before ldconfig finishes writing would
+# SIGPIPE it, and `set -o pipefail` would then abort the script (exit 141).
+LIBVLC="$(ldconfig -p | awk '/libvlc\.so/ && !x {print $NF; x=1}')"
+LIBVLCCORE="$(ldconfig -p | awk '/libvlccore\.so/ && !x {print $NF; x=1}')"
 VLC_PLUGINS="$(dirname "${LIBVLC}")/vlc/plugins"
 [ -d "${VLC_PLUGINS}" ] || VLC_PLUGINS="/usr/lib/x86_64-linux-gnu/vlc/plugins"
 [ -d "${VLC_PLUGINS}" ] || { echo "VLC plugins dir not found"; exit 1; }
@@ -51,7 +53,7 @@ echo ">> Resolving transitive .so dependencies via ldd"
 EXCLUDE='^(libc|libm|libdl|libpthread|librt|libresolv|ld-linux.*|libutil|libgcc_s|libGL|libGLX|libEGL|libdrm|libGLdispatch|libX11|libxcb)\.so'
 collect_deps() {
   for f in "$@"; do
-    ldd "${f}" 2>/dev/null | awk '/=> \//{print $3}'
+    ldd "${f}" 2>/dev/null | awk '/=> \//{print $3}' || true
   done
 }
 mapfile -t SCAN < <(find "${APPDIR}/usr/lib" -name '*.so*' -type f)
@@ -63,12 +65,12 @@ done
 
 echo ">> Bundling Qt's xcb platform-plugin prerequisites"
 for lib in libxcb-cursor.so.0 libxkbcommon.so.0 libxkbcommon-x11.so.0; do
-  p="$(ldconfig -p | awk -v l="${lib}" '$1==l{print $NF; exit}')"
+  p="$(ldconfig -p | awk -v l="${lib}" '$1==l && !x {print $NF; x=1}')"
   [ -n "${p}" ] && cp -L "${p}" "${APPDIR}/usr/lib/" || true
 done
 
 echo ">> Regenerating the VLC plugin cache"
-CACHEGEN="$(find /usr/lib -name vlc-cache-gen -type f 2>/dev/null | head -n1)"
+CACHEGEN="$(find /usr/lib -name vlc-cache-gen -type f -print -quit 2>/dev/null || true)"
 [ -n "${CACHEGEN}" ] && "${CACHEGEN}" "${APPDIR}/usr/lib/vlc/plugins" || \
   echo "WARN: vlc-cache-gen not found; plugins will be scanned at startup"
 
