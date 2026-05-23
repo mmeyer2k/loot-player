@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loot-player"
+description = "Local media library and player"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dynamic = ["version"]
+dependencies = [
+    "PyQt6",
+    "python-vlc",
+    "qtawesome",
+]
+
+[project.scripts]
+loot-player = "loot_player.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "loot_player.version.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["loot_player*"]
