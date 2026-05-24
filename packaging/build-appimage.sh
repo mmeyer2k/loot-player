@@ -9,7 +9,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${0}")/.." && pwd)"
-VERSION="${1:-$(python3 -c 'import loot_player.version as v; print(v.__version__)')}"
+VERSION="${1:-$(cd "${REPO}" && python3 -c 'import loot_player.version as v; print(v.__version__)')}"
 ARCH="x86_64"
 
 # Pinned tool versions (bump deliberately).
@@ -66,13 +66,20 @@ done
 echo ">> Bundling Qt's xcb platform-plugin prerequisites"
 for lib in libxcb-cursor.so.0 libxkbcommon.so.0 libxkbcommon-x11.so.0; do
   p="$(ldconfig -p | awk -v l="${lib}" '$1==l && !x {print $NF; x=1}')"
-  [ -n "${p}" ] && cp -L "${p}" "${APPDIR}/usr/lib/" || true
+  if [ -n "${p}" ]; then
+    cp -L "${p}" "${APPDIR}/usr/lib/"   # a copy failure here aborts (set -e)
+  else
+    echo "WARN: ${lib} not found on build host; the GUI may fail to start"
+  fi
 done
 
 echo ">> Regenerating the VLC plugin cache"
 CACHEGEN="$(find /usr/lib -name vlc-cache-gen -type f -print -quit 2>/dev/null || true)"
-[ -n "${CACHEGEN}" ] && "${CACHEGEN}" "${APPDIR}/usr/lib/vlc/plugins" || \
+if [ -n "${CACHEGEN}" ]; then
+  "${CACHEGEN}" "${APPDIR}/usr/lib/vlc/plugins"   # a real failure aborts (set -e)
+else
   echo "WARN: vlc-cache-gen not found; plugins will be scanned at startup"
+fi
 
 echo ">> Desktop integration (icon + .desktop + AppRun)"
 rsvg-convert -w 256 -h 256 "${REPO}/assets/loot.svg" -o "${APPDIR}/loot-player.png"
