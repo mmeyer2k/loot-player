@@ -10,12 +10,10 @@ export PYTHON_VLC_MODULE_PATH="${HERE}/usr/lib/vlc/plugins"
 export LD_LIBRARY_PATH="${HERE}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 export LOOT_PLAYER_ICON="${HERE}/loot-player.png"
 
-# libVLC's set_xwindow needs the xcb platform plugin; force it under KDE
-# (mirrors the dev Makefile) unless the user already chose a platform.
-if [ -z "${QT_QPA_PLATFORM:-}" ]; then
-    case "${XDG_CURRENT_DESKTOP:-}" in
-        *KDE*) export QT_QPA_PLATFORM=xcb ;;
-    esac
-fi
+# libVLC embeds video via an X11 window id (set_xwindow), so Qt must use the
+# xcb platform plugin. xcb is X11's native default and works under XWayland, so
+# force it on every session (a no-op on plain X11) unless the user overrode it.
+# Native Wayland gives winId() a non-X11 surface handle and video won't embed.
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 
 exec "${HERE}/usr/python/bin/python3" -m loot_player "$@"
