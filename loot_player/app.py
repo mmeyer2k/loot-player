@@ -770,15 +770,30 @@ def _icon_path() -> str:
 def selfcheck() -> int:
     """Smoke-test the runtime so a broken bundle never ships.
 
-    Verifies Qt is importable, libVLC loads, and VLC plugins are discoverable
-    (an empty/blank plugin path yields no audio-output modules). Returns 0 on
-    success, 1 otherwise. Run in CI as `--selfcheck` under xvfb.
+    Verifies the Qt platform plugin (xcb) loads, libVLC loads, and VLC plugins
+    are discoverable (an empty/blank plugin path yields no audio-output
+    modules). Returns 0 on success, 1 otherwise. Run in CI as `--selfcheck`
+    under xvfb.
     """
     try:
-        import PyQt6.QtWidgets  # noqa: F401  (import-only Qt check)
+        from PyQt6.QtWidgets import QApplication, QWidget
         import vlc
     except Exception as exc:  # pragma: no cover - import failure path
         print(f"selfcheck: import failed: {exc}", file=sys.stderr)
+        return 1
+
+    # An import alone never dlopens the Qt platform plugin (libqxcb.so) or its
+    # bundled prerequisites — constructing a QApplication and showing a widget
+    # does, which is exactly what a broken GUI bundle fails at. (A truly
+    # unloadable plugin makes Qt abort the process, which still fails CI.)
+    try:
+        app = QApplication.instance() or QApplication(["loot-player"])
+        w = QWidget()
+        w.show()
+        app.processEvents()
+        w.close()
+    except Exception as exc:  # pragma: no cover - platform-plugin failure path
+        print(f"selfcheck: Qt platform init failed: {exc}", file=sys.stderr)
         return 1
 
     inst = vlc.Instance(["--quiet"])
