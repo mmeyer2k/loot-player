@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QByteArray, QEvent, QSize, QTimer
-from PyQt6.QtGui import QIcon, QShortcut, QKeySequence
+from PyQt6.QtGui import QIcon, QShortcut, QKeySequence, QCursor
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel,
@@ -85,6 +85,8 @@ def data_dir() -> Path:
 
 
 class MainWindow(QMainWindow):
+    # How long the pointer must hold still (ms) before it's hidden in fullscreen.
+    _CURSOR_HIDE_MS = 2000
     _SHUFFLE_CYCLE = ["off", "within", "between"]
     _SHUFFLE_VISUALS = {
         # mode -> (icon color or None for default, tooltip)
@@ -107,6 +109,9 @@ class MainWindow(QMainWindow):
         self._tree_pane_width = 300
         self._queue_pane_width = 300
         self._is_muted = False
+        self._cursor_hidden = False
+        self._cursor_idle_ms = 0
+        self._last_cursor_pos = QCursor.pos()
 
         self._build_ui()
 
@@ -124,6 +129,14 @@ class MainWindow(QMainWindow):
         self.tick.setInterval(500)
         self.tick.timeout.connect(self._on_tick)
         self.tick.start()
+
+        # Polls the global pointer position while fullscreen so we can hide the
+        # cursor when it holds still. We poll instead of using mouseMoveEvent
+        # because libVLC renders into a native child window that swallows Qt
+        # mouse events over the video surface.
+        self._cursor_timer = QTimer(self)
+        self._cursor_timer.setInterval(250)
+        self._cursor_timer.timeout.connect(self._poll_cursor)
 
     # UI -------------------------------------------------------------------
     def _build_ui(self):
@@ -493,8 +506,38 @@ class MainWindow(QMainWindow):
         self._apply_chrome_visibility()
         if self._fullscreen:
             self.showFullScreen()
+            self._last_cursor_pos = QCursor.pos()
+            self._cursor_idle_ms = 0
+            self._cursor_timer.start()
         else:
+            self._cursor_timer.stop()
+            self._show_cursor()
             self.showNormal()
+
+    def _poll_cursor(self):
+        """Hide the pointer after it holds still; reveal it on any movement.
+
+        Active only while fullscreen (the timer is stopped otherwise)."""
+        pos = QCursor.pos()
+        if pos != self._last_cursor_pos:
+            self._last_cursor_pos = pos
+            self._cursor_idle_ms = 0
+            self._show_cursor()
+        else:
+            self._cursor_idle_ms += self._cursor_timer.interval()
+            if self._cursor_idle_ms >= self._CURSOR_HIDE_MS:
+                self._hide_cursor()
+
+    def _hide_cursor(self):
+        # setOverrideCursor stacks; the flag keeps set/restore paired 1:1.
+        if not self._cursor_hidden:
+            QApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
+            self._cursor_hidden = True
+
+    def _show_cursor(self):
+        if self._cursor_hidden:
+            QApplication.restoreOverrideCursor()
+            self._cursor_hidden = False
 
     def _toggle_cinema_mode(self):
         self._cinema = not self._cinema
