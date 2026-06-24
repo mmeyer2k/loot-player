@@ -22,6 +22,12 @@ class VlcWidget(QFrame):
         self.setMinimumSize(QSize(480, 270))
 
         self.instance = vlc.Instance(["--no-video-title-show", "--quiet"])
+        if self.instance is None:
+            raise RuntimeError(
+                "Could not initialize libVLC. VLC's libraries or plugins are "
+                "missing or unloadable. If running from source, install VLC "
+                "(e.g. `sudo apt install vlc`)."
+            )
         self.player = self.instance.media_player_new()
         em = self.player.event_manager()
         em.event_attach(vlc.EventType.MediaPlayerOpening,
@@ -34,6 +40,16 @@ class VlcWidget(QFrame):
     def attach(self):
         wid = int(self.winId())
         if sys.platform.startswith("linux"):
+            from PyQt6.QtGui import QGuiApplication
+            platform = QGuiApplication.platformName()
+            if platform != "xcb":
+                # set_xwindow needs an X11 window id; on a native Wayland (or
+                # other) backend winId() is not one and video won't embed.
+                print(
+                    f"loot-player: Qt platform is '{platform}', not 'xcb'; "
+                    "video embedding requires xcb (set QT_QPA_PLATFORM=xcb).",
+                    file=sys.stderr,
+                )
             self.player.set_xwindow(wid)
         elif sys.platform == "win32":
             self.player.set_hwnd(wid)

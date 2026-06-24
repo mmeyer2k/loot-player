@@ -6,6 +6,21 @@ shell-out. Organize your stuff into named, typed libraries (Movies, TV,
 Music, Generic), browse it through a hierarchical tree with smart-search,
 and queue / shuffle / cinema-mode your way through it.
 
+## Install (AppImage)
+
+Download the latest `loot-player-<version>-x86_64.AppImage` from the
+[Releases](https://github.com/mmeyer2k/loot-player/releases) page, then:
+
+```bash
+chmod +x loot-player-*-x86_64.AppImage
+./loot-player-*-x86_64.AppImage
+```
+
+It bundles libVLC, so no system VLC install is required. Works on
+glibc 2.35+ distros (Ubuntu 22.04+, Debian 12+, Fedora 36+, recent Arch).
+
+To run it from source instead, see **Setup** below.
+
 ## Setup
 
 System packages (Ubuntu / Debian):
@@ -101,3 +116,17 @@ tests/                  # pytest: matching parsers + DB neighbor/random helpers
 ```bash
 python3 -m pytest tests/ -v
 ```
+
+## Cutting a release
+
+Releases are built by CI (`.github/workflows/release.yml`) on tag push:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+CI stamps the version from the tag, builds a self-contained AppImage, runs its
+`--selfcheck`, and attaches it to a new GitHub Release. To build one locally for
+debugging, run `packaging/build-appimage.sh` (it accepts an optional version arg
+used only for the output filename).

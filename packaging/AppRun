@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# AppImage entrypoint. Points python-vlc at the bundled libVLC, ensures the
+# bundled libs and the xcb platform plugin load, then runs the app.
+set -euo pipefail
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+
+export PYTHON_VLC_LIB_PATH="${HERE}/usr/lib/libvlc.so"
+export PYTHON_VLC_MODULE_PATH="${HERE}/usr/lib/vlc/plugins"
+export LD_LIBRARY_PATH="${HERE}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export LOOT_PLAYER_ICON="${HERE}/loot-player.png"
+
+# libVLC embeds video via an X11 window id (set_xwindow), so Qt must use the
+# xcb platform plugin. xcb is X11's native default and works under XWayland, so
+# force it on every session (a no-op on plain X11) unless the user overrode it.
+# Native Wayland gives winId() a non-X11 surface handle and video won't embed.
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+
+exec "${HERE}/usr/python/bin/python3" -m loot_player "$@"

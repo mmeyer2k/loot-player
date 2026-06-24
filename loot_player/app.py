@@ -24,6 +24,7 @@ from loot_player.scanner import Scanner
 from loot_player.ui.library_editor import LibraryEditor
 from loot_player.ui.library_tree import LibraryTree
 from loot_player.ui.queue_panel import QueuePanel
+from loot_player.version import __version__
 
 APP_NAME = "loot-player"
 APP_BRAND = "loot"
@@ -800,13 +801,82 @@ class MainWindow(QMainWindow):
         super().closeEvent(ev)
 
 
-def main():
-    app = QApplication(sys.argv)
+def _icon_path() -> str:
+    """Window-icon path. Honors LOOT_PLAYER_ICON (set by the AppImage AppRun),
+    falling back to the in-repo SVG for source runs."""
+    env = os.environ.get("LOOT_PLAYER_ICON")
+    if env and Path(env).is_file():
+        return env
+    return str(_LOGO_PATH)
+
+
+def selfcheck() -> int:
+    """Smoke-test the runtime so a broken bundle never ships.
+
+    Verifies the Qt platform plugin (xcb) loads, libVLC loads, and VLC plugins
+    are discoverable (an empty/blank plugin path yields no audio-output
+    modules). Returns 0 on success, 1 otherwise. Run in CI as `--selfcheck`
+    under xvfb.
+    """
+    try:
+        from PyQt6.QtWidgets import QApplication, QWidget
+        import vlc
+    except Exception as exc:  # pragma: no cover - import failure path
+        print(f"selfcheck: import failed: {exc}", file=sys.stderr)
+        return 1
+
+    # An import alone never dlopens the Qt platform plugin (libqxcb.so) or its
+    # bundled prerequisites — constructing a QApplication and showing a widget
+    # does, which is exactly what a broken GUI bundle fails at. (A truly
+    # unloadable plugin makes Qt abort the process, which still fails CI.)
+    try:
+        app = QApplication.instance() or QApplication(["loot-player"])
+        w = QWidget()
+        w.show()
+        app.processEvents()
+        w.close()
+    except Exception as exc:  # pragma: no cover - platform-plugin failure path
+        print(f"selfcheck: Qt platform init failed: {exc}", file=sys.stderr)
+        return 1
+
+    inst = vlc.Instance(["--quiet"])
+    if inst is None:
+        print("selfcheck: vlc.Instance() returned None (libVLC/plugins not loadable)",
+              file=sys.stderr)
+        return 1
+
+    if not inst.audio_output_list_get():
+        print("selfcheck: no VLC audio output modules found (PYTHON_VLC_MODULE_PATH wrong?)",
+              file=sys.stderr)
+        return 1
+
+    version = (vlc.libvlc_get_version() or b"unknown").decode(errors="replace")
+    print(f"selfcheck OK: loot-player {__version__}, libvlc {version}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv if argv is None else argv)
+    args = argv[1:]
+
+    if "--version" in args:
+        print(__version__)
+        return 0
+
+    if "--selfcheck" in args:
+        return selfcheck()
+
+    app = QApplication(argv)
     app.setApplicationName(APP_NAME)
-    icon = QIcon(str(_LOGO_PATH))
+    icon = QIcon(_icon_path())
     app.setWindowIcon(icon)
-    w = MainWindow()
+    try:
+        w = MainWindow()
+    except RuntimeError as exc:
+        print(f"loot-player: {exc}", file=sys.stderr)
+        QMessageBox.critical(None, APP_BRAND, str(exc))
+        return 1
     w.setWindowIcon(icon)
     w.show()
     w.video.attach()
-    sys.exit(app.exec())
+    return app.exec()

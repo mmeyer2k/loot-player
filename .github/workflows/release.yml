@@ -1,0 +1,41 @@
+name: Release AppImage
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y vlc librsvg2-bin patchelf wget file \
+            libxcb-cursor0 libxkbcommon-x11-0 xvfb
+
+      - name: Stamp version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          printf '__version__ = "%s"\n' "${VERSION}" > loot_player/version.py
+
+      - name: Build AppImage
+        run: packaging/build-appimage.sh "${VERSION}"
+
+      - name: Smoke-test the AppImage
+        run: |
+          chmod +x "loot-player-${VERSION}-x86_64.AppImage"
+          xvfb-run -a "./loot-player-${VERSION}-x86_64.AppImage" --selfcheck
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: loot-player-${{ env.VERSION }}-x86_64.AppImage
+          generate_release_notes: true
