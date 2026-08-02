@@ -20,4 +20,4 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 echo "Installed: $TARGET"
-echo "Icon:      $REPO/assets/loot.svg"
+echo "Icon:      $REPO/loot_player/assets/loot.svg"

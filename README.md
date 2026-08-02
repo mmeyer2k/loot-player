@@ -89,6 +89,9 @@ loot_player/
 ├── matching.py         # parse_movie / parse_tv / parse_music / parse_generic
 ├── models.py           # FileRow dataclass + QueueModel
 ├── player.py           # VlcWidget (QFrame hosting libVLC)
+├── version.py          # __version__, single source of truth
+├── vlc_check.py        # "VLC not found" preflight used by the AppImage
+├── assets/loot.svg     # app icon (in-package so it survives installation)
 └── ui/
     ├── library_tree.py # The tree on the left (search + tree + "+ New Library")
     ├── library_editor.py

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from importlib.resources import files
 from pathlib import Path
 from typing import Optional
 
@@ -29,7 +30,7 @@ from loot_player.version import __version__
 APP_NAME = "loot-player"
 APP_BRAND = "loot"
 _PRIOR_APP_NAMES = ("vlc-ranger", "vlc-library")
-_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "loot.svg"
+_LOGO_PATH = Path(str(files("loot_player") / "assets" / "loot.svg"))
 
 
 class ClickJumpSlider(QSlider):
