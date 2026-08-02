@@ -24,6 +24,7 @@ from loot_player.scanner import Scanner
 from loot_player.ui.library_editor import LibraryEditor
 from loot_player.ui.library_tree import LibraryTree
 from loot_player.ui.queue_panel import QueuePanel
+from loot_player.version import __version__
 
 APP_NAME = "loot-player"
 APP_BRAND = "loot"
@@ -801,6 +802,11 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    # Handled before QApplication so `--version` works with no display. The
+    # AppImage smoke test relies on this.
+    if "--version" in sys.argv[1:]:
+        print(f"{APP_BRAND} {__version__}")
+        return
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     icon = QIcon(str(_LOGO_PATH))
