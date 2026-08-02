@@ -1,4 +1,4 @@
-.PHONY: run test install-desktop clean appimage appimage-clean
+.PHONY: run test install-desktop clean appimage appimage-clean appimage-sweep
 
 # xcb is required for libVLC's set_xwindow on KDE Wayland and a no-op on X11
 # (xcb is X11's native default), so set it unconditionally.
@@ -37,3 +37,15 @@ appimage:
 
 appimage-clean:
 	rm -rf build dist
+
+# Requires a build (see `appimage`, above) and VLC installed on this machine
+# (`apt install vlc` / `dnf install vlc` / `pacman -S vlc`). Same script CI
+# runs after the --version smoke test; see packaging/vlc-plugin-sweep.py for
+# what class of bug this catches and why --version can't.
+appimage-sweep:
+	@appimage="$$(ls dist/loot-*-x86_64.AppImage 2>/dev/null | head -1)"; \
+	if [ -z "$$appimage" ]; then \
+	  echo "no AppImage in dist/; run 'make appimage' first" >&2; \
+	  exit 1; \
+	fi; \
+	python3 packaging/vlc-plugin-sweep.py "$$appimage"

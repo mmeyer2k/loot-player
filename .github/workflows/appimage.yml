@@ -1,0 +1,103 @@
+name: appimage
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match loot_player/version.py
+        if: startsWith(github.ref, 'refs/tags/v')
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          file_version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' loot_player/version.py)"
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$file_version" != "$tag_version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match __version__ $file_version" >&2
+            exit 1
+          fi
+          echo "version $file_version matches tag $GITHUB_REF_NAME"
+
+      # Same script the developer runs. A CI-only build path is a build path
+      # that breaks without anyone noticing. The build itself takes roughly
+      # 7 minutes; the timeout below is generous headroom, not an estimate.
+      - name: Build
+        timeout-minutes: 20
+        run: make appimage CONTAINER_ENGINE=docker
+
+      # No xvfb anywhere in this workflow, and DISPLAY / WAYLAND_DISPLAY must
+      # never be set on the runner. --version returns before QApplication is
+      # constructed, and vlc_check.main() skips its dialog when there is no
+      # display, so neither smoke test below needs one. A virtual display
+      # would only create a way for a modal dialog to block the runner until
+      # it times out, with no one to dismiss it.
+      - name: Smoke test with VLC installed
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/src -w /src ubuntu:22.04 bash -euo pipefail -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends vlc >/dev/null
+            appimage="$(ls dist/loot-*-x86_64.AppImage)"
+            expected="loot $(sed -n "s/^__version__ = \"\(.*\)\"$/\1/p" loot_player/version.py)"
+            actual="$("$appimage" --appimage-extract-and-run --version)"
+            echo "expected: $expected"
+            echo "actual:   $actual"
+            [ "$actual" = "$expected" ]
+          '
+
+      # This is the headline check in this workflow, not a formality. This
+      # AppImage does not bundle libVLC; it dlopens the host's, which dlopens
+      # roughly 400 plugin .so files into the same process. The bundled
+      # python3 carries an RPATH that every one of those dlopen calls
+      # inherits and that outranks LD_LIBRARY_PATH, so any library that ends
+      # up in the AppDir can silently shadow the host's copy for plugins that
+      # were never built against anything in the AppDir. That already
+      # happened once: a bundled glib missing symbols the host's plugins
+      # needed broke 8 of 382 plugins, including the H.264/HEVC/AAC/MP3
+      # decoders, and every check above (including --version, which never
+      # touches libVLC) stayed green throughout. See
+      # packaging/vlc-plugin-sweep.py for the full mechanism and
+      # packaging/appimage-extra-excludes for the one instance of it that's
+      # fixed. A nonzero exit here fails the build.
+      - name: dlopen sweep of host VLC plugins
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/src -w /src ubuntu:22.04 bash -euo pipefail -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends vlc python3 >/dev/null
+            python3 packaging/vlc-plugin-sweep.py
+          '
+
+      - name: Smoke test without VLC installed
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/src -w /src ubuntu:22.04 bash -euo pipefail -c '
+            appimage="$(ls dist/loot-*-x86_64.AppImage)"
+            if "$appimage" --appimage-extract-and-run --version; then
+              echo "expected a nonzero exit when VLC is absent" >&2
+              exit 1
+            fi
+          ' 2>&1 | tee /tmp/novlc.log
+          grep -q "could not find VLC" /tmp/novlc.log
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        timeout-minutes: 5
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.AppImage
+          generate_release_notes: true
