@@ -101,10 +101,16 @@ log "Pruning unused Qt modules"
 rm -rf "$QT6/qml" "$QT6/translations" "$QT6/plugins/qmltooling"
 rm -f "$QT6"/lib/libQt6Quick*.so* "$QT6"/lib/libQt6Qml*.so*
 # A GNOME target sets QT_QPA_PLATFORMTHEME=gtk3, and libqgtk3.so then pulls
-# the host's GTK stack in against bundled libraries. Same class of mismatch
-# as the glib case in packaging/appimage-extra-excludes. Qt falls back to its
-# own dialogs without these, which is the safer default inside a bundle.
-rm -rf "$QT6/plugins/platformthemes"
+# in libgtk-3, libgio-2.0 and libgobject-2.0. That is the glib chain from
+# packaging/appimage-extra-excludes, so this one plugin has to go.
+#
+# libqxdgdesktopportal.so stays. It needs only libQt6Gui, libQt6DBus,
+# libQt6Core, libGL, libxkbcommon and libstdc++, so it carries none of that
+# risk, and it is what supplies xdg-portal file dialogs and the
+# org.freedesktop.appearance color-scheme hint. Without a platformtheme plugin
+# at all Qt falls back to QGenericUnixTheme's light palette and the app renders
+# light on a dark desktop.
+rm -f "$QT6/plugins/platformthemes/libqgtk3.so"
 # libqtiff wants libtiff.so.5, gone from Ubuntu 24.04 on. loot renders svg
 # and png only.
 rm -f "$QT6/plugins/imageformats/libqtiff.so"

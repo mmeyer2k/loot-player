@@ -215,8 +215,15 @@ these is both safe and necessary.
 `QT_QPA_PLATFORMTHEME` is cleared for a related reason: a GNOME target sets it
 to `gtk3`, and Qt would load a gtk3 theme plugin against the host's GTK stack.
 Qt degrades to its own dialogs rather than crashing, so this is styling loss
-and stderr noise, but it is avoidable. The `platformthemes` plugin directory is
-pruned from the AppDir as well, so the variable is belt and braces.
+and stderr noise, but it is avoidable. `libqgtk3.so` is deleted from the AppDir
+too, so the variable is belt and braces.
+
+Only that one plugin is deleted. `libqxdgdesktopportal.so` stays: it needs
+`libQt6Gui`, `libQt6DBus`, `libQt6Core`, `libGL`, `libxkbcommon` and
+`libstdc++` and nothing from GTK or glib, and it supplies xdg-portal file
+dialogs plus the `org.freedesktop.appearance color-scheme` hint. Removing the
+whole `platformthemes` directory leaves Qt on `QGenericUnixTheme` and its
+default light palette, which makes the app render light on a dark desktop.
 
 ### Why the VLC preflight
 
@@ -383,6 +390,32 @@ Plus a short "Building the AppImage" note near the Tests section documenting
   plugins would resolve against it. See "why glib may never be bundled" above.
   The build fails if one appears. This constrains any future addition to the
   AppDir, not just the current `ldd` walk.
+- **The glib rule is a patch on one instance, not a fix for the class.** The
+  underlying mechanism is untouched: the bundled `python3` still carries
+  `DT_RPATH` (not `RUNPATH`) `$ORIGIN/../lib`, so every `dlopen` the host's
+  libVLC performs still prefers `AppDir/usr/lib` over the system copy. Only
+  glib is denied.
+
+  Seven sonames still in `usr/lib` are direct `NEEDED` entries of host VLC
+  plugins on the machine this was measured on: `libdbus-1.so.3` (3 plugins),
+  `libgcrypt.so.20` (6), `libpng16.so.16` (1), `libsystemd.so.0` (1),
+  `libxcb-keysyms.so.1` (2), `libxcb-randr.so.0` (1), `libxcb-shm.so.0` (3).
+  Several export strictly fewer symbols than the host's: bundled
+  `libsystemd.so.0` exports 861 against the host's 1149, and bundled
+  `libdbus-1.so.3` exports 659 against 694. That is the same shape as the glib
+  bug. It does not fire only because the plugins that need those libraries do
+  not happen to call the newer symbols.
+
+  The `dlopen` sweep is currently the only thing that detects this class, and
+  it is run by hand. Automating it is routed into the CI task, which turns the
+  residual from a latent risk into a monitored one.
+
+  A structural fix would mean keeping `AppDir/usr/lib` off any process-wide
+  search path: `RUNPATH` rather than `RPATH` on the bundled objects, since
+  `RUNPATH` is not inherited by `dlopen`, plus dropping `LD_LIBRARY_PATH` from
+  AppRun. That was considered and deliberately not attempted here. It is a
+  design change to how the bundle resolves its own libraries and it would risk
+  a working build.
 - **Only rootless podman is exercised.** Rootful docker leaves `build/` and
   `dist/` owned by root and `make appimage-clean` then needs sudo. Documented
   in the Makefile.
