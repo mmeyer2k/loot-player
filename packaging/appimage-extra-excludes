@@ -1,0 +1,34 @@
+# Libraries this AppImage must never bundle, on top of the vendored
+# pkg2appimage excludelist.
+#
+# The vendored list assumes a self-contained application. This one is not:
+# it deliberately ships no libVLC and instead dlopens the host's, which in
+# turn dlopens ~400 host plugins into the same process.
+#
+# Those plugins resolve their own dependencies against whatever is already
+# loaded. The bundled python3 has DT_RPATH (not RUNPATH) of $ORIGIN/../lib,
+# and RPATH is inherited by every dlopen in the process and outranks
+# LD_LIBRARY_PATH, so anything in the AppDir's usr/lib wins for the host's
+# plugins too.
+#
+# glib is the case that bites. libqxcb.so needs libglib-2.0 and libgthread-2.0
+# but not libgobject/libgio/libgmodule, so an ldd walk bundles a partial,
+# older glib. The host's VLC plugins then link against that instead of the
+# host's complete, newer one. Measured on Ubuntu 22.04 build host against a
+# 26.04 target: 8 of 382 plugins failed with "undefined symbol: g_dir_unref",
+# among them libavcodec_plugin.so and libavformat_plugin.so, so H.264, HEVC,
+# AAC and MP3 would not decode.
+#
+# Bundling the complete glib family is not the fix; it fails in the mirror
+# direction, with the host's newer plugins calling into an older ABI. The fix
+# is that no glib-family library enters the AppDir at all. Every desktop that
+# has VLC has glib, so relying on the host's is safe.
+#
+# The acceptance test is a dlopen sweep of every host VLC plugin under
+# AppRun's environment. It must report zero failures.
+
+libglib-2.0.so.0
+libgthread-2.0.so.0
+libgobject-2.0.so.0
+libgio-2.0.so.0
+libgmodule-2.0.so.0

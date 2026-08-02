@@ -20,6 +20,26 @@ PYTHON_BUILD="20260728"
 PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD}/cpython-${PYTHON_VERSION}+${PYTHON_BUILD}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
 APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
 
+# CONTAINER ONLY is a constraint, not advice, so enforce it. Run directly on a
+# newer host as a normal user and the apt step below is skipped, the ldd walk
+# copies that host's glibc-linked libraries into the AppDir, and the result
+# runs almost nowhere. Nothing about the build fails, and the first symptom is
+# a user on another machine getting a crash, so fail loudly here instead.
+HOST_VERSION_ID="$(sed -n 's/^VERSION_ID="\?\([^"]*\)"\?$/\1/p' /etc/os-release 2>/dev/null || true)"
+if [ "${LOOT_APPIMAGE_ALLOW_ANY_HOST:-}" != "1" ] && [ "$HOST_VERSION_ID" != "22.04" ]; then
+    cat >&2 <<EOF
+This builds on Ubuntu 22.04 only; this machine reports ${HOST_VERSION_ID:-no VERSION_ID}.
+
+Run it through the container:
+
+    make appimage
+
+Set LOOT_APPIMAGE_ALLOW_ANY_HOST=1 to override. The AppImage will then be
+built against this machine's glibc and will not run on older ones.
+EOF
+    exit 1
+fi
+
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$REPO/build"
 APPDIR="$BUILD/AppDir"
@@ -49,6 +69,17 @@ fi
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr" "$CACHE" "$DIST"
 
+# One normalized denylist from the vendored upstream copy plus our own.
+# Upstream puts trailing comments on some entries, so a literal whole-line
+# match silently misses them. libxcb-dri3.so.0 and libxcb-dri2.so.0 are two of
+# the three, and they are on that list precisely because bundling them breaks
+# the target's GPU driver.
+EXCLUDES="$BUILD/excludes.txt"
+cat "$REPO/packaging/appimage-excludelist" \
+    "$REPO/packaging/appimage-extra-excludes" \
+    | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' \
+    | grep -v '^$' | sort -u > "$EXCLUDES"
+
 log "Fetching CPython ${PYTHON_VERSION}"
 PBS_TAR="$CACHE/cpython-${PYTHON_VERSION}-${PYTHON_BUILD}.tar.gz"
 [ -f "$PBS_TAR" ] || curl -fsSL "$PBS_URL" -o "$PBS_TAR"
@@ -65,16 +96,18 @@ SITE="$APPDIR/usr/lib/python${PYTHON_MINOR}/site-packages"
 QT6="$SITE/PyQt6/Qt6"
 [ -d "$QT6" ] || { echo "PyQt6/Qt6 missing at $QT6" >&2; exit 1; }
 
-# libVLC must never end up inside the AppDir.
-if find "$APPDIR" -name 'libvlc*.so*' -print -quit | grep -q .; then
-    echo "libvlc found in AppDir; it must not be bundled" >&2
-    exit 1
-fi
-
 log "Pruning unused Qt modules"
 # loot imports QtCore, QtGui and QtWidgets only.
 rm -rf "$QT6/qml" "$QT6/translations" "$QT6/plugins/qmltooling"
 rm -f "$QT6"/lib/libQt6Quick*.so* "$QT6"/lib/libQt6Qml*.so*
+# A GNOME target sets QT_QPA_PLATFORMTHEME=gtk3, and libqgtk3.so then pulls
+# the host's GTK stack in against bundled libraries. Same class of mismatch
+# as the glib case in packaging/appimage-extra-excludes. Qt falls back to its
+# own dialogs without these, which is the safer default inside a bundle.
+rm -rf "$QT6/plugins/platformthemes"
+# libqtiff wants libtiff.so.5, gone from Ubuntu 24.04 on. loot renders svg
+# and png only.
+rm -f "$QT6/plugins/imageformats/libqtiff.so"
 
 log "Deploying xcb libraries for the Qt platform plugin"
 mkdir -p "$APPDIR/usr/lib"
@@ -89,12 +122,36 @@ if ldd "$QXCB" | grep -q 'not found'; then
 fi
 
 while read -r lib; do
+    # Qt's own libraries and ICU resolve through PyQt6's RPATH into Qt6/lib,
+    # which is already in the AppDir. Copying them back out to usr/lib
+    # duplicated ~57MB, libicudata.so.73 twice at 32MB each.
+    case "$lib" in "$APPDIR"/*) continue ;; esac
     base="$(basename "$lib")"
-    grep -qxF "$base" "$REPO/packaging/appimage-excludelist" && continue
+    grep -qxF "$base" "$EXCLUDES" && continue
     [ -e "$APPDIR/usr/lib/$base" ] && continue
     cp -L "$lib" "$APPDIR/usr/lib/$base"
     echo "    + $base"
 done < <(ldd "$QXCB" | awk '/=> \//{print $3}' | sort -u)
+
+log "Checking nothing forbidden was bundled"
+# After the copy loop, which is the only step that can introduce a violation.
+
+# libVLC must never end up inside the AppDir, plugin tree included.
+if find "$APPDIR" \( -name 'libvlc*.so*' -o -name 'libvlccore*.so*' \
+        -o -path '*/vlc/plugins/*' \) -print -quit | grep -q .; then
+    echo "libvlc or a vlc plugin tree found in AppDir; neither may be bundled" >&2
+    find "$APPDIR" \( -name 'libvlc*.so*' -o -name 'libvlccore*.so*' \
+        -o -path '*/vlc/plugins/*' \) >&2
+    exit 1
+fi
+
+# Nor may glib, because the host's VLC plugins would resolve against it.
+if find "$APPDIR" -name 'libg*-2.0.so*' -print -quit | grep -q .; then
+    echo "glib found in AppDir; the host's VLC plugins would link against it" >&2
+    find "$APPDIR" -name 'libg*-2.0.so*' >&2
+    echo "see packaging/appimage-extra-excludes" >&2
+    exit 1
+fi
 
 log "Writing AppDir metadata"
 install -Dm755 "$REPO/packaging/AppRun" "$APPDIR/AppRun"

@@ -12,8 +12,12 @@ PY="$APPDIR/usr/bin/python3"
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 
 # A KDE session exports these pointing at the host's Qt 6. The bundled Qt
-# loading host plugins mixes ABIs and crashes on startup.
-unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH
+# loading host plugins mixes ABIs and crashes on startup. QT_QPA_PLATFORMTHEME
+# is here for a different reason: a GNOME target sets it to gtk3, and Qt would
+# load a gtk3 theme plugin against the host's GTK stack. That is styling loss
+# and stderr noise rather than a crash, but it is avoidable.
+unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH \
+      QT_QPA_PLATFORMTHEME
 
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
@@ -21,6 +25,14 @@ export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # on sys.path ahead of the bundled site-packages, so launching from a source
 # checkout silently runs the checkout instead of the AppImage.
 export PYTHONSAFEPATH=1
+
+# PYTHONSAFEPATH covers the working directory and nothing else. User site
+# packages are still enabled, and ~/.local/lib/python3.13/site-packages sorts
+# ahead of the bundle's own site-packages; PYTHONPATH is still honored too.
+# A user with their own PyQt6 in either place would shadow the bundled one
+# with a mismatched ABI. PYTHONHOME would repoint the interpreter entirely.
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH PYTHONHOME
 
 # libVLC is deliberately not bundled. Without this the failure surfaces deep
 # in the import graph and a desktop-menu launch shows nothing on screen.

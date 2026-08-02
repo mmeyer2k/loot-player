@@ -91,8 +91,9 @@ that breaks without anyone noticing.
 |---|---|
 | 1. Interpreter | Download pinned `cpython-3.13.14+20260728-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz` from `astral-sh/python-build-standalone`, extract to `AppDir/usr`. Relocatable by construction. |
 | 2. Install | `AppDir/usr/bin/python3 -m pip install --no-cache-dir .` Pulls PyQt6, PyQt6-Qt6, PyQt6-sip, qtawesome, qtpy, python-vlc from wheels. |
-| 3. Prune Qt | Delete `Qt6/qml`, `Qt6/lib/libQt6Quick*`, `Qt6/lib/libQt6Qml*`, `Qt6/plugins/qmltooling`, `Qt6/translations`. The app imports only QtCore, QtGui, QtWidgets. |
-| 4. Deploy xcb libs | `ldd` on `PyQt6/Qt6/plugins/platforms/libqxcb.so`, copy resolved libraries to `AppDir/usr/lib`, filtered through the vendored AppImage excludelist. |
+| 3. Prune Qt | Delete `Qt6/qml`, `Qt6/lib/libQt6Quick*`, `Qt6/lib/libQt6Qml*`, `Qt6/plugins/qmltooling`, `Qt6/translations`, `Qt6/plugins/platformthemes`, `Qt6/plugins/imageformats/libqtiff.so`. The app imports only QtCore, QtGui, QtWidgets. |
+| 4. Deploy xcb libs | `ldd` on `PyQt6/Qt6/plugins/platforms/libqxcb.so`, copy resolved libraries to `AppDir/usr/lib`, filtered through the vendored AppImage excludelist plus our own denylist. Anything `ldd` resolves to a path already inside the AppDir is skipped. |
+| 4b. Guard | Fail the build if any `libvlc*`, `libvlccore*`, `*/vlc/plugins/*` or glib-family library ended up in the AppDir. |
 | 5. Metadata | Write `AppRun`, `loot.desktop`, `loot.svg` at AppDir root, and the same desktop file and icon under `usr/share/applications/` and `usr/share/icons/hicolor/scalable/apps/`. appimagetool wants the root copies; desktop integration tools read the `usr/share` ones. |
 | 6. Package | `APPIMAGE_EXTRACT_AND_RUN=1 appimagetool-x86_64.AppImage AppDir dist/loot-<version>-x86_64.AppImage` |
 | 7. Report | Print the finished size. |
@@ -110,11 +111,47 @@ machine and works on another.
 The [AppImage excludelist](https://raw.githubusercontent.com/AppImage/pkg2appimage/master/excludelist)
 (53 entries) is the canonical denylist for exactly this. It gets vendored into
 `packaging/appimage-excludelist` rather than fetched at build time, so builds
-are reproducible and work offline.
+are reproducible and work offline. That file stays a verbatim upstream copy;
+local additions go in `packaging/appimage-extra-excludes` and both are
+concatenated into one normalized list. Normalizing matters: upstream puts
+trailing `#` comments on three entries, including `libxcb-dri3.so.0` and
+`libxcb-dri2.so.0`, so a literal whole-line match would silently miss the
+two entries that exist to stop us breaking the target's GPU driver.
 
 What survives the filter is a short list dominated by `libxcb-cursor.so.0`,
 the library Ubuntu does not install by default and the direct cause of the
 "could not load the Qt platform plugin xcb" error.
+
+### Step 4 detail: why glib may never be bundled
+
+This is a hard constraint that follows directly from not bundling libVLC, and
+future work must not undo it.
+
+The upstream excludelist assumes a self-contained application. This AppImage
+is deliberately not one: it dlopens the host's libVLC, which dlopens roughly
+400 host plugins into the same process. Those plugins resolve their own
+dependencies against whatever the process has already loaded. The bundled
+`python3` carries `DT_RPATH` (not `RUNPATH`) of `$ORIGIN/../lib`, and RPATH is
+inherited by every `dlopen` in the process and outranks `LD_LIBRARY_PATH`, so
+anything in `AppDir/usr/lib` wins for the host's plugins too.
+
+`libqxcb.so` needs `libglib-2.0` and `libgthread-2.0` but not
+`libgobject`/`libgio`/`libgmodule`, so an unguarded `ldd` walk bundles a
+partial, older glib. Measured with a 22.04 build on a 26.04 target: 8 of 382
+host VLC plugins failed to load with `undefined symbol: g_dir_unref`, among
+them `libavcodec_plugin.so` and `libavformat_plugin.so`. H.264, HEVC, AAC and
+MP3 would not decode, which defeats the entire point of linking against the
+host's VLC.
+
+Bundling the *complete* glib family is not the fix; it fails in the mirror
+direction, with the host's newer plugins calling into an older ABI. The fix is
+that no glib-family library enters the AppDir at all. Every desktop that has
+VLC has glib, so depending on the host's is safe.
+
+The acceptance test is a `dlopen` sweep of every host VLC plugin under
+AppRun's environment, which must report zero failures. A passing `--version`
+proves nothing here; this bug survived a full round of verification because
+`--version` never touches a codec.
 
 ## AppDir layout
 
@@ -144,11 +181,23 @@ AppDir/
 APPDIR resolved from $0 if not already set
 QT_QPA_PLATFORM defaults to xcb, overridable by the user
 unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH
+      QT_QPA_PLATFORMTHEME
 LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"
-preflight: "$APPDIR/usr/bin/python3" -c "import vlc"
+PYTHONSAFEPATH=1, PYTHONNOUSERSITE=1, unset PYTHONPATH PYTHONHOME
+preflight: "$APPDIR/usr/bin/python3" -c "import vlc; vlc.libvlc_get_version()"
    exit 0  -> exec python3 -m loot_player "$@"
    nonzero -> print to stderr, show Qt dialog, exit 1
 ```
+
+### Why the Python path variables are scrubbed
+
+A bundle must run its own code. `PYTHONSAFEPATH` keeps the working directory
+off `sys.path`, so launching from a source checkout runs the AppImage rather
+than the checkout. It covers nothing else, so `PYTHONNOUSERSITE` is also set:
+`~/.local/lib/python3.13/site-packages` otherwise sorts ahead of the bundle's
+own site-packages, and a user with their own PyQt6 there would shadow the
+bundled one with a mismatched ABI. `PYTHONPATH` and `PYTHONHOME` are unset for
+the same reason.
 
 ### Why `QT_QPA_PLATFORM=xcb`
 
@@ -163,13 +212,28 @@ bundled Qt picks those up it loads host plugins against bundled libraries and
 crashes. PyQt6 resolves its own plugins relative to the package, so clearing
 these is both safe and necessary.
 
+`QT_QPA_PLATFORMTHEME` is cleared for a related reason: a GNOME target sets it
+to `gtk3`, and Qt would load a gtk3 theme plugin against the host's GTK stack.
+Qt degrades to its own dialogs rather than crashing, so this is styling loss
+and stderr noise, but it is avoidable. The `platformthemes` plugin directory is
+pruned from the AppDir as well, so the variable is belt and braces.
+
 ### Why the VLC preflight
 
-`vlc.py:191` raises `NotImplementedError("Cannot find libvlc lib")` at import
-time when `libvlc.so.5` is absent. `loot_player.app` imports `player`, which
-imports `vlc`, so a missing VLC is an unhandled traceback before any window
-exists. Launched from a desktop menu that is a silent no-op with nothing to
-diagnose.
+`loot_player.app` imports `player`, which imports `vlc`, so a missing VLC
+breaks before any window exists. Launched from a desktop menu that is a silent
+no-op with nothing to diagnose.
+
+Detecting it takes more than `import vlc`, **which succeeds on a machine with
+no VLC installed at all.** On Linux `vlc.py` calls
+`ctypes.CDLL(find_library("vlc"))`; with VLC absent `find_library` returns
+None, so the call is `ctypes.CDLL(None)`, which is `dlopen(NULL)` and hands
+back the running program's own symbol table instead of raising. The
+`libvlc.so.5` fallback at `vlc.py:191` that would raise
+`NotImplementedError("Cannot find libvlc lib")` is therefore never reached.
+The failure surfaces later, at the first real libvlc symbol lookup. So both
+AppRun and `loot_player.vlc_check.libvlc_available` probe by calling
+`vlc.libvlc_get_version()` rather than by importing.
 
 Because PyQt6 is bundled, the fallback dialog can be a `QMessageBox` and is
 always available. No dependency on `zenity` or `kdialog` being installed. The
@@ -305,6 +369,7 @@ Plus a short "Building the AppImage" note near the Tests section documenting
 | Runs without a dev environment | `--version` under `xvfb-run` in a container holding only `vlc` and `xvfb`. |
 | Qt platform plugin loads | Covered by the above. A missing xcb lib fails at Qt init, before `--version` can print. |
 | Missing VLC is handled | Run the smoke container without installing `vlc`. Expect exit 1 and the diagnostic on stderr, not a traceback. |
+| Host VLC plugins still load | `dlopen` sweep of every plugin under `/usr/lib/x86_64-linux-gnu/vlc/plugins` using the bundled `python3` with AppRun's environment. Must report zero failures. This is the acceptance test for the no-glib rule and the only automatable proxy for "media actually decodes". |
 | Actually plays media | Manual, on the dev machine. Launch the AppImage, add a library, play a file. Not automatable here. |
 | Icon resolves when installed | Manual. The window icon is present in the AppImage, which is the case `parent.parent` broke. |
 | Existing tests still pass | `make test`. The asset move and the `--version` flag are the only things that could disturb them. |
@@ -314,6 +379,13 @@ Plus a short "Building the AppImage" note near the Tests section documenting
 - **x86_64 only.**
 - **glibc 2.34 floor.** Set by the PyQt6 wheel tags, not by us.
 - **VLC must be installed.** By design.
+- **No glib-family library may ever be bundled**, because the host's VLC
+  plugins would resolve against it. See "why glib may never be bundled" above.
+  The build fails if one appears. This constrains any future addition to the
+  AppDir, not just the current `ldd` walk.
+- **Only rootless podman is exercised.** Rootful docker leaves `build/` and
+  `dist/` owned by root and `make appimage-clean` then needs sudo. Documented
+  in the Makefile.
 - **FUSE 2 needed to run**, absent by default on Ubuntu 24.04+. Documented, with
   the `--appimage-extract-and-run` escape hatch.
 - **Size is unmeasured.** No estimate is quoted anywhere in this spec on purpose.
@@ -331,7 +403,8 @@ Plus a short "Building the AppImage" note near the Tests section documenting
 | `packaging/build-appimage.sh` | new |
 | `packaging/AppRun` | new |
 | `packaging/loot-appimage.desktop` | new |
-| `packaging/appimage-excludelist` | new, vendored |
+| `packaging/appimage-excludelist` | new, vendored verbatim from upstream |
+| `packaging/appimage-extra-excludes` | new, our own additions to the above |
 | `.github/workflows/appimage.yml` | new |
 | `loot_player/version.py` | new |
 | `loot_player/__main__.py` | new |

@@ -397,7 +397,18 @@ way an installed package has to."
 
 ### Task 3: libVLC preflight
 
-`vlc.py` raises `NotImplementedError("Cannot find libvlc lib")` at import time when `libvlc.so.5` is absent. `loot_player.app` imports `player`, which imports `vlc`, so a missing VLC is a traceback before any window exists. From a desktop menu that is a silent no-op. This module turns it into something a user can act on.
+> **Correction, made during Task 4.** This section originally said `vlc.py`
+> raises `NotImplementedError` at import time when `libvlc.so.5` is absent.
+> That is wrong, and the error propagated into the shipped code before it was
+> caught. `import vlc` **succeeds with no VLC installed**: on Linux `vlc.py`
+> calls `ctypes.CDLL(find_library("vlc"))`, `find_library` returns None, and
+> `ctypes.CDLL(None)` is `dlopen(NULL)`, which returns the running program's
+> own symbol table rather than raising. The `libvlc.so.5` fallback that would
+> raise is never reached. The real failure is the first libvlc symbol lookup,
+> so the probe must call one. The code blocks below are corrected in place;
+> the shipped files are the source of truth.
+
+`loot_player.app` imports `player`, which imports `vlc`, so a missing VLC breaks before any window exists. From a desktop menu that is a silent no-op. This module turns it into something a user can act on.
 
 **Files:**
 - Create: `loot_player/vlc_check.py`
@@ -487,14 +498,22 @@ Create `loot_player/vlc_check.py`:
 ```python
 """Preflight for a usable libVLC.
 
-``vlc.py`` raises NotImplementedError at import time when libvlc.so.5 is
-absent, and ``loot_player.app`` imports it transitively through ``player``.
-Inside an AppImage that happens before any window exists, so launching from
-a desktop menu does nothing visible at all.
+``loot_player.app`` imports ``vlc`` transitively through ``player``. Inside
+an AppImage that happens before any window exists, so launching from a
+desktop menu does nothing visible at all.
+
+Detecting the missing library takes more than ``import vlc``, which succeeds
+on a machine with no VLC installed. On Linux ``vlc.py`` does
+``ctypes.CDLL(find_library("vlc"))``, and with VLC absent ``find_library``
+returns None, so that call is ``ctypes.CDLL(None)``. That is ``dlopen(NULL)``,
+which hands back the running program's own symbol table rather than raising,
+so the fallback to ``libvlc.so.5`` never runs and the module imports cleanly.
+The first lookup of a real libvlc symbol is where it actually breaks. Probe
+by calling one.
 
 The AppImage deliberately does not bundle libVLC (see
 docs/superpowers/specs/2026-08-01-appimage-build-design.md), so AppRun calls
-this module when the import fails and the user gets a dialog instead of a
+this module when the probe fails and the user gets a dialog instead of a
 traceback nobody sees.
 """
 
@@ -513,9 +532,15 @@ INSTALL_HINTS = (
 
 
 def libvlc_available() -> bool:
-    """True when the VLC shared library can be loaded."""
+    """True when libVLC is present and can actually be called into.
+
+    Calls a symbol rather than just importing. See the module docstring for
+    why the import alone succeeds with no VLC installed.
+    """
     try:
-        import vlc  # noqa: F401
+        import vlc
+
+        vlc.libvlc_get_version()
     except Exception:
         return False
     return True
@@ -598,6 +623,17 @@ test cannot block on a modal nobody can dismiss."
 
 The build itself. Ends with a runnable file.
 
+> **Correction, made during Task 4.** The build script below bundles glib as a
+> side effect of the `ldd` walk on `libqxcb.so`, and that breaks the host's VLC
+> plugins: 8 of 382 failed with `undefined symbol: g_dir_unref`, including
+> `libavcodec_plugin.so` and `libavformat_plugin.so`. No glib-family library
+> may enter the AppDir, because this AppImage dlopens the host's libVLC. The
+> shipped script adds `packaging/appimage-extra-excludes`, strips trailing
+> comments before matching the vendored list, skips libraries already inside
+> the AppDir, gates on Ubuntu 22.04, and fails the build if libvlc or glib
+> appears. See the spec's "why glib may never be bundled". The shipped files
+> are the source of truth, not the blocks below.
+
 **Files:**
 - Create: `packaging/appimage-excludelist`
 - Create: `packaging/AppRun`
@@ -645,9 +681,12 @@ unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH
 
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-# libVLC is deliberately not bundled. Without this, `import vlc` raises deep
-# in the import graph and a desktop-menu launch fails with nothing on screen.
-if ! "$PY" -c "import vlc" >/dev/null 2>&1; then
+# libVLC is deliberately not bundled. Without this the failure surfaces deep
+# in the import graph and a desktop-menu launch shows nothing on screen.
+#
+# Corrected during Task 4: probe by calling a libvlc symbol, not by importing.
+# `import vlc` succeeds with no VLC installed; see the Task 3 correction note.
+if ! "$PY" -c "import vlc; vlc.libvlc_get_version()" >/dev/null 2>&1; then
     exec "$PY" -m loot_player.vlc_check
 fi
 
