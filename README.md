@@ -145,13 +145,15 @@ on your machine: PyQt6 publishes exactly one x86_64 Linux wheel tag,
 newer glibc produces a binary that runs almost nowhere.
 
 libVLC is not bundled. The AppImage links against the host's VLC, which
-keeps ~400 VLC plugins and their codec dependencies out of the bundle.
+keeps 382 VLC plugins and their codec dependencies out of the bundle.
 `packaging/AppRun` checks for it at startup and explains what to install
 if it is absent.
 
 `make appimage-sweep` runs `packaging/vlc-plugin-sweep.py`, which dlopens
-every one of the host's ~380 VLC plugins through the AppImage's bundled
-interpreter and fails if any hits an unresolved symbol, and CI runs it on
+every one of the host's 382 VLC plugins through the AppImage's bundled
+interpreter and fails if any hits an unresolved symbol; run it yourself
+after `make appimage`, especially after touching the excludelist or
+anything else that changes what gets bundled, and CI runs it again on
 every tagged build. It exists because that link cuts both ways: any
 library bundled for Qt's sake can shadow the host's copy for one of
 VLC's plugins and break it. That happened during development: a bundled
