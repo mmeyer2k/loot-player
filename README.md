@@ -6,7 +6,41 @@ shell-out. Organize your stuff into named, typed libraries (Movies, TV,
 Music, Generic), browse it through a hierarchical tree with smart-search,
 and queue / shuffle / cinema-mode your way through it.
 
-## Setup
+## Install
+
+### AppImage
+
+VLC is required either way. loot plays through the VLC libraries already
+on your system rather than shipping its own copy:
+
+```bash
+sudo apt install vlc        # Debian / Ubuntu
+sudo dnf install vlc        # Fedora
+sudo pacman -S vlc          # Arch
+```
+
+Then grab the AppImage from
+[Releases](https://github.com/mmeyer2k/loot-player/releases), make it
+executable, and run it:
+
+```bash
+chmod +x loot-*-x86_64.AppImage
+./loot-*-x86_64.AppImage --appimage-extract-and-run
+```
+
+Requires glibc 2.34 or newer: Ubuntu 22.04+, Debian 12+, Fedora 35+,
+RHEL 9+, current Arch. x86_64 only.
+
+`--appimage-extract-and-run` is there because AppImages normally need
+FUSE 2, and Ubuntu 24.04 and later don't install it by default. If FUSE
+2 is present on your system (`sudo apt install libfuse2t64` adds it on
+newer Ubuntu), you can drop the flag and run the AppImage directly:
+
+```bash
+./loot-*-x86_64.AppImage
+```
+
+### From source
 
 System packages (Ubuntu / Debian):
 
@@ -98,6 +132,35 @@ loot_player/
     └── queue_panel.py
 tests/                  # pytest: matching parsers + DB neighbor/random helpers
 ```
+
+## Building the AppImage
+
+```bash
+make appimage        # -> dist/loot-<version>-x86_64.AppImage
+```
+
+Needs podman or docker. The build runs inside `ubuntu:22.04` rather than
+on your machine: PyQt6 publishes exactly one x86_64 Linux wheel tag,
+`manylinux_2_34`, so glibc 2.34 is the floor, and building against a
+newer glibc produces a binary that runs almost nowhere.
+
+libVLC is not bundled. The AppImage links against the host's VLC, which
+keeps ~400 VLC plugins and their codec dependencies out of the bundle.
+`packaging/AppRun` checks for it at startup and explains what to install
+if it is absent.
+
+`make appimage-sweep` runs `packaging/vlc-plugin-sweep.py`, which dlopens
+every one of the host's ~380 VLC plugins through the AppImage's bundled
+interpreter and fails if any hits an unresolved symbol, and CI runs it on
+every tagged build. It exists because that link cuts both ways: any
+library bundled for Qt's sake can shadow the host's copy for one of
+VLC's plugins and break it. That happened during development: a bundled
+glib broke `libavcodec` and `libavformat`, so nothing would have decoded
+H.264 or AAC, and every other check still passed because `--version`
+never touches Qt or VLC.
+
+Set `CONTAINER_ENGINE=docker` to override the default of podman.
+`make appimage-clean` removes `build/` and `dist/`.
 
 ## Tests
 
