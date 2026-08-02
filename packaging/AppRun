@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# AppImage entrypoint. Everything runs from a read-only squashfs mount, so
+# every path is relative to $APPDIR.
+set -euo pipefail
+
+APPDIR="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+PY="$APPDIR/usr/bin/python3"
+
+# libVLC's set_xwindow needs a real X11 window handle, which a native Wayland
+# Qt session does not hand out. A no-op on X11, since xcb is the default there.
+# Defaulted rather than forced so it can still be overridden.
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+
+# A KDE session exports these pointing at the host's Qt 6. The bundled Qt
+# loading host plugins mixes ABIs and crashes on startup.
+unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH
+
+export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# A bundle must run its own code. Python otherwise puts the working directory
+# on sys.path ahead of the bundled site-packages, so launching from a source
+# checkout silently runs the checkout instead of the AppImage.
+export PYTHONSAFEPATH=1
+
+# libVLC is deliberately not bundled. Without this the failure surfaces deep
+# in the import graph and a desktop-menu launch shows nothing on screen.
+#
+# The probe calls a libvlc symbol rather than just importing vlc. `import vlc`
+# succeeds with no VLC installed at all: vlc.py falls back to ctypes.CDLL(None),
+# which is dlopen(NULL) and returns the main program's symbol table instead of
+# raising. The first real libvlc call is where it actually breaks.
+if ! "$PY" -c "import vlc; vlc.libvlc_get_version()" >/dev/null 2>&1; then
+    exec "$PY" -m loot_player.vlc_check
+fi
+
+exec "$PY" -m loot_player "$@"
