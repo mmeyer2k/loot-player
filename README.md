@@ -25,19 +25,24 @@ executable, and run it:
 
 ```bash
 chmod +x loot-*-x86_64.AppImage
-./loot-*-x86_64.AppImage --appimage-extract-and-run
+./loot-*-x86_64.AppImage
 ```
 
 Requires glibc 2.34 or newer: Ubuntu 22.04+, Debian 12+, Fedora 35+,
 RHEL 9+, current Arch. x86_64 only.
 
-`--appimage-extract-and-run` is there because AppImages normally need
-FUSE 2, and Ubuntu 24.04 and later don't install it by default. If FUSE
-2 is present on your system (`sudo apt install libfuse2t64` adds it on
-newer Ubuntu), you can drop the flag and run the AppImage directly:
+AppImages need FUSE 2, and Ubuntu 24.04 and later don't install it by
+default. If the run above fails to mount:
 
 ```bash
-./loot-*-x86_64.AppImage
+sudo apt install libfuse2t64
+```
+
+Or skip FUSE entirely, at the cost of an extracted copy of the whole
+AppImage left behind in `$TMPDIR`, which is usually RAM:
+
+```bash
+./loot-*-x86_64.AppImage --appimage-extract-and-run
 ```
 
 ### From source

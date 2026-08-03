@@ -91,7 +91,7 @@ that breaks without anyone noticing.
 |---|---|
 | 1. Interpreter | Download pinned `cpython-3.13.14+20260728-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz` from `astral-sh/python-build-standalone`, extract to `AppDir/usr`. Relocatable by construction. |
 | 2. Install | `AppDir/usr/bin/python3 -m pip install --no-cache-dir .` Pulls PyQt6, PyQt6-Qt6, PyQt6-sip, qtawesome, qtpy, python-vlc from wheels. |
-| 3. Prune Qt | Delete `Qt6/qml`, `Qt6/lib/libQt6Quick*`, `Qt6/lib/libQt6Qml*`, `Qt6/plugins/qmltooling`, `Qt6/translations`, `Qt6/plugins/platformthemes`, `Qt6/plugins/imageformats/libqtiff.so`. The app imports only QtCore, QtGui, QtWidgets. |
+| 3. Prune Qt | Delete `Qt6/qml`, `Qt6/lib/libQt6Quick*`, `Qt6/lib/libQt6Qml*`, `Qt6/plugins/qmltooling`, `Qt6/translations`, `Qt6/plugins/imageformats/libqtiff.so`, and the two plugins that link glib: `Qt6/plugins/platformthemes/libqgtk3.so` and `Qt6/plugins/networkinformation/libqglib.so`. The app imports only QtCore, QtGui, QtWidgets. **Not** the whole `platformthemes` directory: `libqxdgdesktopportal.so` has to stay or the app renders light on a dark desktop. See "Why unset the Qt path variables" below. |
 | 4. Deploy xcb libs | `ldd` on `PyQt6/Qt6/plugins/platforms/libqxcb.so`, copy resolved libraries to `AppDir/usr/lib`, filtered through the vendored AppImage excludelist plus our own denylist. Anything `ldd` resolves to a path already inside the AppDir is skipped. |
 | 4b. Guard | Fail the build if any `libvlc*`, `libvlccore*`, `*/vlc/plugins/*` or glib-family library ended up in the AppDir. |
 | 5. Metadata | Write `AppRun`, `loot.desktop`, `loot.svg` at AppDir root, and the same desktop file and icon under `usr/share/applications/` and `usr/share/icons/hicolor/scalable/apps/`. appimagetool wants the root copies; desktop integration tools read the `usr/share` ones. |
@@ -218,12 +218,19 @@ Qt degrades to its own dialogs rather than crashing, so this is styling loss
 and stderr noise, but it is avoidable. `libqgtk3.so` is deleted from the AppDir
 too, so the variable is belt and braces.
 
-Only that one plugin is deleted. `libqxdgdesktopportal.so` stays: it needs
-`libQt6Gui`, `libQt6DBus`, `libQt6Core`, `libGL`, `libxkbcommon` and
-`libstdc++` and nothing from GTK or glib, and it supplies xdg-portal file
-dialogs plus the `org.freedesktop.appearance color-scheme` hint. Removing the
-whole `platformthemes` directory leaves Qt on `QGenericUnixTheme` and its
-default light palette, which makes the app render light on a dark desktop.
+Only that one plugin goes from `platformthemes`. `libqxdgdesktopportal.so`
+stays: it needs `libQt6Gui`, `libQt6DBus`, `libQt6Core`, `libGL`,
+`libxkbcommon` and `libstdc++` and nothing from GTK or glib, and it supplies
+xdg-portal file dialogs plus the `org.freedesktop.appearance color-scheme`
+hint. Removing the whole `platformthemes` directory leaves Qt on
+`QGenericUnixTheme` and its default light palette, which makes the app render
+light on a dark desktop.
+
+`networkinformation/libqglib.so` is deleted under the same rule that removes
+`libqgtk3.so`, not this one. It has `DT_NEEDED` on `libgobject-2.0` and
+`libgio-2.0`, so it is a standing reason for someone to bundle the glib family
+the no-glib rule exists to keep out, and loot never uses
+`QNetworkInformation`.
 
 ### Why the VLC preflight
 
@@ -318,18 +325,56 @@ Two new targets:
 
 ## CI
 
-`.github/workflows/appimage.yml`, triggered on `push: tags: ['v*']`. This is the
-repo's first workflow.
+`.github/workflows/appimage.yml`, triggered on `push: tags: ['v*']` and
+`workflow_dispatch`. This is the repo's first and only workflow, so it is also
+the only place any test runs.
 
 | Job step | Detail |
 |---|---|
-| Guard | Fail if `${GITHUB_REF_NAME#v}` differs from `loot_player.version.__version__`. A mislabeled binary is worse than a failed build. |
+| Guard | Fail if `${GITHUB_REF_NAME#v}` differs from `loot_player.version.__version__`. A mislabeled binary is worse than a failed build. Tag pushes only. |
+| Unit tests | `pytest tests/` in `ubuntu:24.04` with `vlc python3-pyqt6 python3-vlc python3-qtawesome python3-pytest`. Runs against the source tree, not the bundle, so it is not redundant with the smoke tests. 24.04 rather than 22.04 because 22.04 has no `python3-pyqt6` package. |
 | Build | `make appimage`, the same containerized script the developer runs. |
-| Smoke test | In a clean `ubuntu:22.04` with only `vlc` and `xvfb` installed, run `xvfb-run ./dist/loot-*.AppImage --version`. Assert exit 0 and that the printed version matches the tag. |
-| Release | Attach the AppImage to a GitHub release for the tag. |
+| Smoke test, VLC present | In a clean `ubuntu:22.04` with only `vlc` installed, run `./dist/loot-*.AppImage --version`. Assert exit 0 and that the printed version matches `version.py`. |
+| dlopen sweep, glibc floor | `packaging/vlc-plugin-sweep.py --min-plugins 300` in `ubuntu:22.04` with a full `vlc`. Proves the bundle loads at the oldest glibc we claim. Cannot detect shadowing: it is the build distro, so bundled and host copies are the same files. |
+| dlopen sweep, skew detector | The same sweep in `ubuntu:rolling`. This is the load-bearing run, and the only step that can catch the glib bug class. See below. |
+| Smoke test, VLC absent | The same `--version` in an `ubuntu:22.04` with no `vlc`. Expect a nonzero exit and "could not find VLC" on stderr, not a traceback. |
+| Release | Attach the AppImage to a GitHub release for the tag. Tag pushes only. |
 
 The smoke test container installing nothing but `vlc` is the real assertion:
 it proves the AppImage's only host dependency is the one we documented.
+
+There is no `xvfb` anywhere in this workflow, and `DISPLAY` and
+`WAYLAND_DISPLAY` must never be set on the runner. `--version` returns before
+`QApplication` is constructed, and `vlc_check.main()` skips its dialog when
+there is no display, so nothing here needs one. A virtual display would only
+create a way for a modal dialog to block the runner until it times out, with
+nobody to dismiss it.
+
+### Why the sweep runs on a newer distro than the build image
+
+A sweep inside `ubuntu:22.04` cannot fail. Every shadowing-capable library in
+`AppDir/usr/lib` was apt-installed into `ubuntu:22.04` by the build step, so
+in that container the bundled copy and the host copy are the same file and
+substituting one for the other is a no-op. The glib incident would have passed
+it, because 22.04's own VLC plugins were built against the glib that got
+bundled and never call `g_dir_unref`.
+
+Skew is the whole signal. Measured on Ubuntu 26.04 against a 22.04-built
+bundle: bundled `libsystemd.so.0` exports 625 symbols against the host's 912,
+bundled `libdbus-1.so.3` 546 against 573. Both are direct `NEEDED` entries of
+host VLC plugins.
+
+`ubuntu:rolling` rather than a pinned `ubuntu:24.04`: the gap widens as users
+move ahead of the build image, and a pinned tag freezes the detector at a skew
+that only shrinks. rolling tracks the widest skew without anyone remembering
+to bump it. The cost is that a floating base image can turn the step red with
+no repo change. That is the signal, not noise.
+
+Both sweeps pass a full `vlc` (no `--no-install-recommends`), because the
+recommended `vlc-plugin-*` packages are 10 to 12 plugins a real user has, and
+`--min-plugins 300` turns "how many did we actually sweep" into a hard floor.
+Without it a container with a partial VLC sweeps 40 plugins and reports
+success.
 
 ## README changes
 
@@ -357,9 +402,15 @@ AppImages need FUSE 2. Ubuntu 24.04 and later do not install it by default:
 
     sudo apt install libfuse2t64
 
-Or skip FUSE entirely:
+Or skip FUSE entirely, at the cost of an extracted copy left in $TMPDIR:
 
     ./loot-x86_64.AppImage --appimage-extract-and-run
+
+That ordering matters. `--appimage-extract-and-run` unpacks the whole
+AppImage to `$TMPDIR/appimage_extracted_<hash>` on every new build hash
+and never cleans up, and `/tmp` is tmpfs on most desktops, so
+recommending it as the default invocation leaks hundreds of MB of RAM
+per build. It is the escape hatch, not the first thing to try.
 
 ### From source
     (existing apt/pacman instructions, unchanged)
@@ -373,10 +424,10 @@ Plus a short "Building the AppImage" note near the Tests section documenting
 | Claim | How it gets checked |
 |---|---|
 | Builds at all | `make appimage` exits 0, `dist/` contains the file. |
-| Runs without a dev environment | `--version` under `xvfb-run` in a container holding only `vlc` and `xvfb`. |
+| Runs without a dev environment | `--version` in a container holding only `vlc`. No `xvfb`: `--version` returns before `QApplication` exists. |
 | Qt platform plugin loads | Covered by the above. A missing xcb lib fails at Qt init, before `--version` can print. |
 | Missing VLC is handled | Run the smoke container without installing `vlc`. Expect exit 1 and the diagnostic on stderr, not a traceback. |
-| Host VLC plugins still load | `dlopen` sweep of every plugin under `/usr/lib/x86_64-linux-gnu/vlc/plugins` using the bundled `python3` with AppRun's environment. Must report zero failures. This is the acceptance test for the no-glib rule and the only automatable proxy for "media actually decodes". |
+| Host VLC plugins still load | `dlopen` sweep of every plugin under `/usr/lib/x86_64-linux-gnu/vlc/plugins` using the bundled `python3` with AppRun's environment, **on a distro newer than the build image**. Must report zero failures over at least `--min-plugins`. This is the acceptance test for the no-glib rule and the only automatable proxy for "media actually decodes". |
 | Actually plays media | Manual, on the dev machine. Launch the AppImage, add a library, play a file. Not automatable here. |
 | Icon resolves when installed | Manual. The window icon is present in the AppImage, which is the case `parent.parent` broke. |
 | Existing tests still pass | `make test`. The asset move and the `--version` flag are the only things that could disturb them. |
@@ -400,15 +451,16 @@ Plus a short "Building the AppImage" note near the Tests section documenting
   plugins on the machine this was measured on: `libdbus-1.so.3` (3 plugins),
   `libgcrypt.so.20` (6), `libpng16.so.16` (1), `libsystemd.so.0` (1),
   `libxcb-keysyms.so.1` (2), `libxcb-randr.so.0` (1), `libxcb-shm.so.0` (3).
-  Several export strictly fewer symbols than the host's: bundled
-  `libsystemd.so.0` exports 861 against the host's 1149, and bundled
-  `libdbus-1.so.3` exports 659 against 694. That is the same shape as the glib
-  bug. It does not fire only because the plugins that need those libraries do
-  not happen to call the newer symbols.
+  Several export strictly fewer symbols than the host's. By
+  `nm -D --defined-only`, bundled `libsystemd.so.0` exports 625 against the
+  host's 912, and bundled `libdbus-1.so.3` 546 against 573. That is the same
+  shape as the glib bug. It does not fire only because the plugins that need
+  those libraries do not happen to call the newer symbols.
 
-  The `dlopen` sweep is currently the only thing that detects this class, and
-  it is run by hand. Automating it is routed into the CI task, which turns the
-  residual from a latent risk into a monitored one.
+  The `dlopen` sweep is the only thing that detects this class. It runs in CI
+  on every tagged build, on a distro newer than the build image so the skew
+  above is actually present, which turns the residual from a latent risk into
+  a monitored one.
 
   A structural fix would mean keeping `AppDir/usr/lib` off any process-wide
   search path: `RUNPATH` rather than `RPATH` on the bundled objects, since
@@ -437,14 +489,19 @@ Plus a short "Building the AppImage" note near the Tests section documenting
 | `packaging/AppRun` | new |
 | `packaging/loot-appimage.desktop` | new |
 | `packaging/appimage-excludelist` | new, vendored verbatim from upstream |
-| `packaging/appimage-extra-excludes` | new, our own additions to the above |
+| `packaging/appimage-extra-excludes` | new, our own additions to the above: the glib family |
+| `packaging/vlc-plugin-sweep.py` | new, the `dlopen` sweep run in CI and by `make appimage-sweep` |
 | `.github/workflows/appimage.yml` | new |
 | `loot_player/version.py` | new |
 | `loot_player/__main__.py` | new |
+| `loot_player/vlc_check.py` | new, `libvlc_available()` plus the "install VLC" dialog AppRun falls back to |
 | `loot_player/assets/loot.svg` | moved from `assets/loot.svg` |
 | `loot_player/app.py` | `_LOGO_PATH` via `importlib.resources`; `--version` flag |
+| `tests/test_version.py` | new, `--version` and the no-display assertion |
+| `tests/test_assets.py` | new, the packaged icon resolves through `importlib.resources` |
+| `tests/test_vlc_check.py` | new, both branches of `libvlc_available()` and the headless `main()` |
 | `packaging/loot.desktop.in` | `Icon=` path |
 | `packaging/install-desktop.sh` | icon path in trailing `echo` |
-| `Makefile` | `appimage`, `appimage-clean` targets |
+| `Makefile` | `appimage`, `appimage-clean`, `appimage-sweep` targets |
 | `.gitignore` | `dist/`, `build/` |
 | `README.md` | install section, build note, architecture tree |
