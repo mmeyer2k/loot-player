@@ -18,7 +18,22 @@ PYTHON_VERSION="3.13.14"
 PYTHON_MINOR="3.13"
 PYTHON_BUILD="20260728"
 PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD}/cpython-${PYTHON_VERSION}+${PYTHON_BUILD}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
-APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+# From the SHA256SUMS asset of that same release.
+PBS_SHA256="6734c3e643c75e860c36ee3a7904e8e6bafbf3232d89b17ffd5fbfa72ab2816c"
+
+# A dated release, not the `continuous` tag. `continuous` is rebuilt in place,
+# so build/cache/ hands a developer whichever one they downloaded first while
+# a clean CI workspace gets today's, and the two silently build with different
+# tools.
+#
+# One thing here still floats and is not ours to pin: appimagetool fetches the
+# type2 runtime from AppImage/type2-runtime's own `continuous` tag while it
+# packages, so that ~950KB blob differs between builds. Pinning it would mean
+# passing --runtime-file with a vendored copy. Not done; recorded so the next
+# person does not read the digests below as covering everything downloaded.
+APPIMAGETOOL_VERSION="1.9.1"
+APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
+APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
 
 # CONTAINER ONLY is a constraint, not advice, so enforce it. Run directly on a
 # newer host as a normal user and the apt step below is skipped, the ldd walk
@@ -52,6 +67,28 @@ OUT="$DIST/loot-${VERSION}-x86_64.AppImage"
 
 log() { printf '\n==> %s\n' "$*"; }
 
+# A pinned URL is not pinned content. Release assets can be replaced, and
+# build/cache/ is reused across builds, so an old or tampered copy would
+# otherwise survive forever on a developer's machine while CI fetches
+# something else. The expected digests are committed above; downloading a
+# checksum alongside the file and comparing the two would prove only that the
+# file matches itself.
+fetch_verified() {
+    url="$1"; dest="$2"; want="$3"
+    if [ -f "$dest" ] && printf '%s  %s\n' "$want" "$dest" | sha256sum -c --status -; then
+        return 0
+    fi
+    rm -f "$dest"
+    curl -fsSL "$url" -o "$dest"
+    if ! printf '%s  %s\n' "$want" "$dest" | sha256sum -c --status -; then
+        echo "checksum mismatch for $url" >&2
+        echo "  expected $want" >&2
+        echo "  actual   $(sha256sum "$dest" | cut -d' ' -f1)" >&2
+        rm -f "$dest"
+        exit 1
+    fi
+}
+
 if [ "$(id -u)" -eq 0 ]; then
     log "Installing build dependencies"
     export DEBIAN_FRONTEND=noninteractive
@@ -82,7 +119,7 @@ cat "$REPO/packaging/appimage-excludelist" \
 
 log "Fetching CPython ${PYTHON_VERSION}"
 PBS_TAR="$CACHE/cpython-${PYTHON_VERSION}-${PYTHON_BUILD}.tar.gz"
-[ -f "$PBS_TAR" ] || curl -fsSL "$PBS_URL" -o "$PBS_TAR"
+fetch_verified "$PBS_URL" "$PBS_TAR" "$PBS_SHA256"
 tar -xf "$PBS_TAR" -C "$APPDIR/usr" --strip-components=1
 
 PY="$APPDIR/usr/bin/python3"
@@ -111,6 +148,11 @@ rm -f "$QT6"/lib/libQt6Quick*.so* "$QT6"/lib/libQt6Qml*.so*
 # at all Qt falls back to QGenericUnixTheme's light palette and the app renders
 # light on a dark desktop.
 rm -f "$QT6/plugins/platformthemes/libqgtk3.so"
+# Same rule, second offender. libqglib.so NEEDs libgobject-2.0 and libgio-2.0,
+# so it is a standing invitation to bundle the glib family the line above
+# exists to keep out. loot never uses QNetworkInformation, so it is dead
+# weight as well.
+rm -f "$QT6/plugins/networkinformation/libqglib.so"
 # libqtiff wants libtiff.so.5, gone from Ubuntu 24.04 on. loot renders svg
 # and png only.
 rm -f "$QT6/plugins/imageformats/libqtiff.so"
@@ -169,11 +211,11 @@ install -Dm644 "$REPO/loot_player/assets/loot.svg" \
     "$APPDIR/usr/share/icons/hicolor/scalable/apps/loot.svg"
 
 log "Packaging"
-TOOL="$CACHE/appimagetool-x86_64.AppImage"
-if [ ! -f "$TOOL" ]; then
-    curl -fsSL "$APPIMAGETOOL_URL" -o "$TOOL"
-    chmod +x "$TOOL"
-fi
+# The version is in the cache filename so bumping the pin invalidates the
+# cached copy instead of quietly reusing the old tool.
+TOOL="$CACHE/appimagetool-${APPIMAGETOOL_VERSION}-x86_64.AppImage"
+fetch_verified "$APPIMAGETOOL_URL" "$TOOL" "$APPIMAGETOOL_SHA256"
+chmod +x "$TOOL"
 rm -f "$OUT"
 # No /dev/fuse in the build container, so appimagetool has to unpack itself.
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 "$TOOL" "$APPDIR" "$OUT" >/dev/null

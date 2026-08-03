@@ -37,11 +37,15 @@ unset PYTHONPATH PYTHONHOME
 # libVLC is deliberately not bundled. Without this the failure surfaces deep
 # in the import graph and a desktop-menu launch shows nothing on screen.
 #
-# The probe calls a libvlc symbol rather than just importing vlc. `import vlc`
-# succeeds with no VLC installed at all: vlc.py falls back to ctypes.CDLL(None),
-# which is dlopen(NULL) and returns the main program's symbol table instead of
-# raising. The first real libvlc call is where it actually breaks.
-if ! "$PY" -c "import vlc; vlc.libvlc_get_version()" >/dev/null 2>&1; then
+# The probe calls loot_player.vlc_check.libvlc_available rather than inlining
+# its own `import vlc; vlc.libvlc_get_version()`. Two copies of one probe means
+# the copy that ships is the copy with no test coverage. vlc_check imports only
+# os and sys at module scope, so routing through it costs nothing at startup.
+# (It calls a libvlc symbol rather than just importing vlc because `import vlc`
+# succeeds with no VLC installed at all: vlc.py falls back to
+# ctypes.CDLL(None), which is dlopen(NULL) and returns the main program's
+# symbol table instead of raising.)
+if ! "$PY" -c "from loot_player.vlc_check import libvlc_available; raise SystemExit(0 if libvlc_available() else 1)" >/dev/null 2>&1; then
     exec "$PY" -m loot_player.vlc_check
 fi
 
