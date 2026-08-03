@@ -27,6 +27,30 @@ jobs:
           fi
           echo "version $file_version matches tag $GITHUB_REF_NAME"
 
+      # These run against the source tree, not the bundle, so they are not
+      # redundant with the smoke tests below: those exercise one AppImage
+      # invocation (--version), while these cover the parsers, the DB helpers,
+      # the packaged asset path and vlc_check. tests/test_assets.py exists
+      # because the icon path broke once an install moved the package out of
+      # the checkout, which is exactly the kind of regression a release
+      # workflow should refuse to ship.
+      #
+      # ubuntu:24.04 rather than the 22.04 build image: 22.04 has no
+      # python3-pyqt6 package at all. 24.04 is the oldest Ubuntu that can
+      # install the documented from-source dependency set. No display is
+      # needed; the suite asserts that.
+      - name: Unit tests
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/src -w /src ubuntu:24.04 bash -euo pipefail -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq vlc python3-pyqt6 python3-vlc \
+              python3-qtawesome python3-pytest >/dev/null
+            python3 -m pytest tests/ -v
+          '
+
       # Same script the developer runs. A CI-only build path is a build path
       # that breaks without anyone noticing. The build itself takes roughly
       # 7 minutes; the timeout below is generous headroom, not an estimate.
@@ -37,9 +61,15 @@ jobs:
       # No xvfb anywhere in this workflow, and DISPLAY / WAYLAND_DISPLAY must
       # never be set on the runner. --version returns before QApplication is
       # constructed, and vlc_check.main() skips its dialog when there is no
-      # display, so neither smoke test below needs one. A virtual display
-      # would only create a way for a modal dialog to block the runner until
-      # it times out, with no one to dismiss it.
+      # display, so no step below needs one. A virtual display would only
+      # create a way for a modal dialog to block the runner until it times
+      # out, with no one to dismiss it.
+      #
+      # --no-install-recommends stays here: this step only execs the AppImage,
+      # so the plugin set does not matter and the smaller install is faster.
+      # The sweep steps below deliberately drop it.
+      #
+      # `ls -t | head -1` for newest, matching Makefile and the sweep script.
       - name: Smoke test with VLC installed
         timeout-minutes: 5
         run: |
@@ -48,7 +78,7 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq
             apt-get install -y -qq --no-install-recommends vlc >/dev/null
-            appimage="$(ls dist/loot-*-x86_64.AppImage)"
+            appimage="$(ls -t dist/loot-*-x86_64.AppImage | head -1)"
             expected="loot $(sed -n "s/^__version__ = \"\(.*\)\"$/\1/p" loot_player/version.py)"
             actual="$("$appimage" --appimage-extract-and-run --version)"
             echo "expected: $expected"
@@ -56,10 +86,10 @@ jobs:
             [ "$actual" = "$expected" ]
           '
 
-      # This is the headline check in this workflow, not a formality. This
-      # AppImage does not bundle libVLC; it dlopens the host's, which dlopens
-      # roughly 400 plugin .so files into the same process. The bundled
-      # python3 carries an RPATH that every one of those dlopen calls
+      # The two steps below are the headline check in this workflow, not a
+      # formality. This AppImage does not bundle libVLC; it dlopens the host's,
+      # which dlopens roughly 400 plugin .so files into the same process. The
+      # bundled python3 carries an RPATH that every one of those dlopen calls
       # inherits and that outranks LD_LIBRARY_PATH, so any library that ends
       # up in the AppDir can silently shadow the host's copy for plugins that
       # were never built against anything in the AppDir. That already
@@ -69,16 +99,60 @@ jobs:
       # touches libVLC) stayed green throughout. See
       # packaging/vlc-plugin-sweep.py for the full mechanism and
       # packaging/appimage-extra-excludes for the one instance of it that's
-      # fixed. A nonzero exit here fails the build.
-      - name: dlopen sweep of host VLC plugins
+      # fixed. A nonzero exit fails the build.
+      #
+      # Neither step passes --no-install-recommends. The recommended
+      # vlc-plugin-* packages are 10 to 12 plugins that a real user has and a
+      # slimmed container would not, and this is the one step whose whole
+      # value is the size and realism of the plugin set. --min-plugins makes
+      # that a hard floor rather than a hope: a base image with a partial VLC
+      # would otherwise sweep 40 plugins and report success.
+      #
+      # This 22.04 run is the glibc-floor check, and on its own it cannot
+      # detect the bug it exists for. Every shadowing-capable library in the
+      # AppDir was apt-installed into ubuntu:22.04 by the build step minutes
+      # earlier, so here the bundled and host copies are the same files and
+      # substituting one for the other is a no-op. The glib incident would
+      # have passed this check: 22.04's own VLC plugins were built against
+      # the glib that got bundled. Keep it for what it does prove, which is
+      # that the bundle loads at the oldest glibc we claim to support.
+      - name: dlopen sweep of host VLC plugins (glibc floor, ubuntu:22.04)
         timeout-minutes: 10
         run: |
           set -euo pipefail
           docker run --rm -v "$PWD":/src -w /src ubuntu:22.04 bash -euo pipefail -c '
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq
-            apt-get install -y -qq --no-install-recommends vlc python3 >/dev/null
-            python3 packaging/vlc-plugin-sweep.py
+            apt-get install -y -qq vlc python3 >/dev/null
+            python3 packaging/vlc-plugin-sweep.py --min-plugins 300
+          '
+
+      # This is the load-bearing run. Shadowing only bites where the bundled
+      # and host copies of a library differ, so the detector's sensitivity is
+      # a function of the distance between the build distro and the target.
+      # Measured on Ubuntu 26.04 against this 22.04-built bundle: bundled
+      # libsystemd.so.0 exports 625 symbols against the host's 912, bundled
+      # libdbus-1.so.3 546 against 573. Both are direct NEEDED entries of host
+      # VLC plugins. That gap is invisible in 22.04.
+      #
+      # ubuntu:rolling rather than a pinned ubuntu:24.04 on purpose. The gap
+      # this looks for widens as users move ahead of the build image, and a
+      # pinned tag freezes the detector at a skew that only shrinks from here.
+      # rolling tracks the widest skew that exists without anyone remembering
+      # to bump it. The cost is a floating base image, so this step can start
+      # failing without a repo change. That is the intended signal, not noise:
+      # it means the newest Ubuntu no longer loads a plugin under our bundle,
+      # and users on it would hit the same thing.
+      - name: dlopen sweep of host VLC plugins (skew detector, ubuntu:rolling)
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/src -w /src ubuntu:rolling bash -euo pipefail -c '
+            export DEBIAN_FRONTEND=noninteractive
+            . /etc/os-release && echo "sweeping under Ubuntu $VERSION_ID"
+            apt-get update -qq
+            apt-get install -y -qq vlc python3 >/dev/null
+            python3 packaging/vlc-plugin-sweep.py --min-plugins 300
           '
 
       - name: Smoke test without VLC installed
@@ -86,7 +160,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm -v "$PWD":/src -w /src ubuntu:22.04 bash -euo pipefail -c '
-            appimage="$(ls dist/loot-*-x86_64.AppImage)"
+            appimage="$(ls -t dist/loot-*-x86_64.AppImage | head -1)"
             if "$appimage" --appimage-extract-and-run --version; then
               echo "expected a nonzero exit when VLC is absent" >&2
               exit 1

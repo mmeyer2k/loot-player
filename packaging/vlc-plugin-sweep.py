@@ -52,11 +52,20 @@ WHAT IT DOES
    uses.
 4. Exits nonzero and lists every plugin that failed to load, if any did.
 
+WHERE TO RUN IT
+
+On a distro *newer* than the one the AppImage was built in. The shadowing this
+detects needs the bundled and host copies of a library to differ; sweep inside
+the build distro and they are the same apt packages, so every substitution is
+a no-op and the sweep passes by construction. The original glib failure would
+have gone unnoticed in a 22.04 sweep, because 22.04's own VLC plugins were
+built against the glib that got bundled.
+
 Usage:
     python3 packaging/vlc-plugin-sweep.py [path/to/loot-*.AppImage]
     python3 packaging/vlc-plugin-sweep.py --plugin-dir /usr/lib/x86_64-linux-gnu/vlc/plugins dist/loot-0.1.0-x86_64.AppImage
 
-With no AppImage argument, the first match of dist/loot-*-x86_64.AppImage
+With no AppImage argument, the newest match of dist/loot-*-x86_64.AppImage
 under the repo root is used.
 """
 
@@ -81,6 +90,16 @@ CANDIDATE_PLUGIN_DIRS = [
     "/usr/lib/vlc/plugins",
     "/usr/lib64/vlc/plugins",
 ]
+
+# A sweep is only as good as the plugin set it sweeps. `apt-get install
+# --no-install-recommends vlc` drops the recommended vlc-plugin-* packages and
+# a container that skipped `apt-get install vlc` entirely has none at all, so
+# without a floor a run over 40 plugins reports success just as cheerfully as
+# a run over 382. Measured full installs: 387 on ubuntu:22.04, 385 on
+# ubuntu:24.04, 382 on ubuntu:26.04, 382 on the dev host. Dropping the
+# recommends costs 10 to 12 of those. 300 sits below every real install and
+# far above any partial one. Pass --min-plugins 0 to disable.
+DEFAULT_MIN_PLUGINS = 300
 
 
 def find_plugin_dir(explicit: str | None) -> str:
@@ -118,13 +137,21 @@ def collect_plugins(plugin_dir: str) -> list[str]:
 
 
 def find_default_appimage() -> str:
-    matches = sorted(glob.glob(os.path.join(REPO_ROOT, "dist", "loot-*-x86_64.AppImage")))
+    """Newest by mtime, not alphabetically first.
+
+    dist/ can hold more than one build: bump the version and the old artifact
+    is still there, sorting ahead of the new one. Sweeping the stale file and
+    believing the fresh one was verified is the worst failure this tool has,
+    because it is the check the whole no-bundled-libVLC design leans on.
+    `Makefile`'s appimage-sweep target picks the same way.
+    """
+    matches = glob.glob(os.path.join(REPO_ROOT, "dist", "loot-*-x86_64.AppImage"))
     if not matches:
         raise SystemExit(
             "no AppImage found under dist/; build one first (`make appimage`) "
             "or pass its path explicitly"
         )
-    return matches[0]
+    return max(matches, key=os.path.getmtime)
 
 
 def extract_appdir(appimage_or_appdir: str, extract_to: str) -> str:
@@ -212,6 +239,15 @@ def main(argv: list[str]) -> int:
         "--plugin-dir",
         help="override the host VLC plugin directory (autodetected by default)",
     )
+    parser.add_argument(
+        "--min-plugins",
+        type=int,
+        default=DEFAULT_MIN_PLUGINS,
+        metavar="N",
+        help="fail if fewer than N plugins were found, so a container with a "
+        f"partial VLC cannot pass vacuously (default {DEFAULT_MIN_PLUGINS}, "
+        "0 disables)",
+    )
     parser.add_argument("--worker", metavar="LISTFILE", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
@@ -223,9 +259,17 @@ def main(argv: list[str]) -> int:
     plugins = collect_plugins(plugin_dir)
     if not plugins:
         raise SystemExit(f"no .so files found under {plugin_dir}")
+    if len(plugins) < args.min_plugins:
+        raise SystemExit(
+            f"only {len(plugins)} plugins under {plugin_dir}, expected at "
+            f"least {args.min_plugins}. A sweep this small proves nothing; "
+            "install the full vlc package (no --no-install-recommends) or "
+            "lower --min-plugins deliberately."
+        )
     print(f"sweeping {len(plugins)} plugins from {plugin_dir}", flush=True)
 
     appimage = args.appimage or find_default_appimage()
+    print(f"against {appimage}", flush=True)
 
     with tempfile.TemporaryDirectory(prefix="vlc-plugin-sweep-") as tmp:
         appdir = extract_appdir(appimage, tmp)

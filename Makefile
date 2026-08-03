@@ -41,9 +41,17 @@ appimage-clean:
 # Requires a build (see `appimage`, above) and VLC installed on this machine
 # (`apt install vlc` / `dnf install vlc` / `pacman -S vlc`). Same script CI
 # runs after the --version smoke test; see packaging/vlc-plugin-sweep.py for
-# what class of bug this catches and why --version can't.
+# what class of bug this catches and why --version can't. Running it here is
+# worth more than the 22.04 run in CI: the bug only shows when the host's
+# libraries differ from the bundled ones, and this machine is newer than the
+# build container.
+#
+# `ls -t` for newest, not `ls` for alphabetically first. Two builds in dist/
+# and the old one sorts ahead of the new one, so you would sweep the stale
+# artifact and believe you had checked the fresh one. Matches
+# find_default_appimage() in the sweep script.
 appimage-sweep:
-	@appimage="$$(ls dist/loot-*-x86_64.AppImage 2>/dev/null | head -1)"; \
+	@appimage="$$(ls -t dist/loot-*-x86_64.AppImage 2>/dev/null | head -1)"; \
 	if [ -z "$$appimage" ]; then \
 	  echo "no AppImage in dist/; run 'make appimage' first" >&2; \
 	  exit 1; \
