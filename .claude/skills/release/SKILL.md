@@ -107,6 +107,23 @@ git commit -m "chore(release): v$TARGET"
 git tag -a "v$TARGET" -m "loot v$TARGET"
 ```
 
+**When there is nothing to commit.** If `version.py` already holds the target
+and is already committed, `git commit` fails with "nothing to commit" and that
+is correct, not an error to route around. It happens on a first release, where
+the file was set to the starting version before any tag existed. Skip the
+commit and tag HEAD directly — the tree already declares the version. Do not
+fabricate an empty commit to keep the shape uniform.
+
+```bash
+if git diff --quiet HEAD -- loot_player/version.py; then
+    echo "version.py already at $TARGET, tagging HEAD"
+else
+    git add loot_player/version.py
+    git commit -m "chore(release): v$TARGET"
+fi
+git tag -a "v$TARGET" -m "loot v$TARGET"
+```
+
 ## Step 4: Stop
 
 Print, and do not run:
