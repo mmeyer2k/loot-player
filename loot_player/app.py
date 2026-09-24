@@ -808,6 +808,11 @@ def main():
     if "--version" in sys.argv[1:]:
         print(f"{APP_BRAND} {__version__}")
         return
+    # libVLC embeds via set_xwindow, which needs a real X window ID. Under a
+    # native Wayland Qt the embed always fails, so default to xcb (XWayland).
+    # The Makefile and AppRun already do this; this covers `python3 main.py`.
+    if sys.platform.startswith("linux"):
+        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     icon = QIcon(str(_LOGO_PATH))
